@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 	"time"
-	"strconv"
-	"strings"
 
 	_ "github.com/lib/pq"
 )
