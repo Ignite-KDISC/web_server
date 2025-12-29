@@ -1,11 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 type Response struct {
@@ -14,12 +17,51 @@ type Response struct {
 	Status    string    `json:"status"`
 }
 
+type DBStatus struct {
+	Connected bool   `json:"connected"`
+	Database  string `json:"database"`
+	Message   string `json:"message"`
+}
+
+var db *sql.DB
+
+func initDB() error {
+	connStr := "host=/var/run/postgresql user=postgres dbname=ignite sslmode=disable"
+	var err error
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		return fmt.Errorf("error opening database: %v", err)
+	}
+
+	if err = db.Ping(); err != nil {
+		return fmt.Errorf("error connecting to database: %v", err)
+	}
+
+	log.Println("✅ Successfully connected to PostgreSQL database 'ignite'")
+	return nil
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	response := Response{
-		Message:   "Server is healthy",
-		Timestamp: time.Now(),
-		Status:    "ok",
+	
+	dbStatus := DBStatus{
+		Connected: false,
+		Database:  "ignite",
+		Message:   "Database connection failed",
+	}
+	
+	if db != nil {
+		if err := db.Ping(); err == nil {
+			dbStatus.Connected = true
+			dbStatus.Message = "Database connection healthy"
+		}
+	}
+	
+	response := map[string]interface{}{
+		"message":   "Server is healthy",
+		"timestamp": time.Now(),
+		"status":    "ok",
+		"database":  dbStatus,
 	}
 	json.NewEncoder(w).Encode(response)
 }
@@ -35,6 +77,17 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Initialize database connection
+	if err := initDB(); err != nil {
+		log.Printf("⚠️  Warning: %v", err)
+		log.Println("Server will start without database connection")
+	}
+	defer func() {
+		if db != nil {
+			db.Close()
+		}
+	}()
+	
 	mux := http.NewServeMux()
 	
 	mux.HandleFunc("/", helloHandler)
@@ -45,6 +98,7 @@ func main() {
 	fmt.Println("📍 Endpoints:")
 	fmt.Println("   GET /        - Hello endpoint")
 	fmt.Println("   GET /health  - Health check")
+	fmt.Println("🗄️  Database: ignite (PostgreSQL)")
 	
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatal(err)
