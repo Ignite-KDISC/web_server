@@ -26,7 +26,7 @@ type DBStatus struct {
 var db *sql.DB
 
 func initDB() error {
-	connStr := "host=/var/run/postgresql port=5433 user=postgres dbname=ignite sslmode=disable"
+	connStr := "host=localhost port=5432 user=postgres dbname=ignite sslmode=disable"
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
@@ -77,17 +77,6 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Initialize database connection
-	if err := initDB(); err != nil {
-		log.Printf("⚠️  Warning: %v", err)
-		log.Println("Server will start without database connection")
-	}
-	defer func() {
-		if db != nil {
-			db.Close()
-		}
-	}()
-	
 	mux := http.NewServeMux()
 	
 	mux.HandleFunc("/", helloHandler)
@@ -98,7 +87,6 @@ func main() {
 	fmt.Println("📍 Endpoints:")
 	fmt.Println("   GET /        - Hello endpoint")
 	fmt.Println("   GET /health  - Health check")
-	fmt.Println("🗄️  Database: ignite (PostgreSQL)")
 	
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatal(err)
