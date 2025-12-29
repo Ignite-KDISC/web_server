@@ -87,7 +87,7 @@ func generateReferenceID() (string, error) {
 }
 
 func initDB() error {
-	connStr := "host=localhost port=5432 user=postgres dbname=ignite sslmode=disable"
+	connStr := "host=/var/run/postgresql port=5433 user=postgres dbname=ignite sslmode=disable"
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
@@ -137,17 +137,121 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ProblemStatementRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.SubmitterName == "" || req.DepartmentName == "" || req.Email == "" || 
+	   req.Title == "" || req.ProblemDescription == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// Validate character limits
+	if len(req.ProblemDescription) > 750 {
+		http.Error(w, "Problem description exceeds 750 characters", http.StatusBadRequest)
+		return
+	}
+	if len(req.CurrentChallenges) > 1000 {
+		http.Error(w, "Current challenges exceeds 1000 characters", http.StatusBadRequest)
+		return
+	}
+	if len(req.ExpectedOutcome) > 750 {
+		http.Error(w, "Expected outcome exceeds 750 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Generate reference ID
+	referenceID, err := generateReferenceID()
+	if err != nil {
+		log.Printf("Error generating reference ID: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert into database
+	query := `
+		INSERT INTO problem_statements (
+			reference_id, submitter_name, department_name, designation, 
+			contact_number, email, title, problem_description, 
+			current_challenges, expected_outcome
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id, created_at
+	`
+
+	var problemStatement ProblemStatement
+	err = db.QueryRow(
+		query,
+		referenceID,
+		req.SubmitterName,
+		req.DepartmentName,
+		req.Designation,
+		req.ContactNumber,
+		req.Email,
+		req.Title,
+		req.ProblemDescription,
+		req.CurrentChallenges,
+		req.ExpectedOutcome,
+	).Scan(&problemStatement.ID, &problemStatement.CreatedAt)
+
+	if err != nil {
+		log.Printf("Error inserting problem statement: %v", err)
+		http.Error(w, "Failed to save problem statement", http.StatusInternalServerError)
+		return
+	}
+
+	problemStatement.ReferenceID = referenceID
+	problemStatement.SubmitterName = req.SubmitterName
+	problemStatement.DepartmentName = req.DepartmentName
+	problemStatement.Email = req.Email
+	problemStatement.Title = req.Title
+	problemStatement.SubmissionStatus = "Active"
+	problemStatement.ReviewDecision = "Under Review"
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"message":      "Problem statement submitted successfully",
+		"reference_id": referenceID,
+		"data":         problemStatement,
+	})
+}
+
 func main() {
+	// Initialize database connection
+	if err := initDB(); err != nil {
+		log.Printf("⚠️  Warning: %v", err)
+		log.Println("Server will start without database connection")
+	}
+	defer func() {
+		if db != nil {
+			db.Close()
+		}
+	}()
+	
 	mux := http.NewServeMux()
 	
-	mux.HandleFunc("/", helloHandler)
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/", enableCORS(helloHandler))
+	mux.HandleFunc("/health", enableCORS(healthHandler))
+	mux.HandleFunc("/api/problem-statements", enableCORS(createProblemStatementHandler))
 	
 	port := ":5000"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
 	fmt.Println("📍 Endpoints:")
-	fmt.Println("   GET /        - Hello endpoint")
-	fmt.Println("   GET /health  - Health check")
+	fmt.Println("   GET  /        - Hello endpoint")
+	fmt.Println("   GET  /health  - Health check")
+	fmt.Println("   POST /api/problem-statements - Submit problem statement")
+	fmt.Println("🗄️  Database: ignite (PostgreSQL)")
 	
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatal(err)
