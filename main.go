@@ -26,7 +26,7 @@ type DBStatus struct {
 var db *sql.DB
 
 func initDB() error {
-	connStr := "host=/var/run/postgresql user=postgres dbname=ignite sslmode=disable"
+	connStr := "host=/var/run/postgresql port=5433 user=postgres dbname=ignite sslmode=disable"
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
