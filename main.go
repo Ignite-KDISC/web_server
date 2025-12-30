@@ -714,7 +714,7 @@ func main() {
 	mux.HandleFunc("/api/admin/login", enableCORS(adminLoginHandler))
 	mux.HandleFunc("/api/admin/dashboard", enableCORS(authenticateAdmin(adminDashboardHandler)))
 	
-	port := ":5000"
+	port := ":8080"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
 	fmt.Println("📍 Endpoints:")
 	fmt.Println("   GET  /        - Hello endpoint")
