@@ -1,11 +1,17 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -92,6 +98,44 @@ func generateReferenceID() (string, error) {
 	nextNum := count + 1
 	referenceID := fmt.Sprintf("IGNIET-%d-%06d", year, nextNum)
 	return referenceID, nil
+}
+
+func isValidFileType(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	validTypes := map[string]bool{
+		".pdf":  true,
+		".doc":  true,
+		".docx": true,
+		".ppt":  true,
+		".pptx": true,
+	}
+	return validTypes[ext]
+}
+
+func generateFileHash(content []byte) string {
+	hash := sha256.Sum256(content)
+	return hex.EncodeToString(hash[:])
+}
+
+func saveUploadedFile(fileContent []byte, originalName string, problemID int64) (string, error) {
+	// Create uploads directory if it doesn't exist
+	uploadsDir := "/app/uploads"
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create uploads directory: %v", err)
+	}
+
+	// Generate hashed filename
+	hash := generateFileHash(fileContent)
+	ext := filepath.Ext(originalName)
+	storedFileName := fmt.Sprintf("%d_%s%s", problemID, hash[:16], ext)
+	filePath := filepath.Join(uploadsDir, storedFileName)
+
+	// Write file to disk
+	if err := os.WriteFile(filePath, fileContent, 0644); err != nil {
+		return "", fmt.Errorf("failed to save file: %v", err)
+	}
+
+	return storedFileName, nil
 }
 
 func initDB() error {
