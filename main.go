@@ -85,7 +85,7 @@ func generateReferenceID() (string, error) {
 }
 
 func initDB() error {
-	connStr := "host=/var/run/postgresql port=5433 user=postgres dbname=ignite sslmode=disable"
+	connStr := "host=postgres port=5432 user=igniteuser password=ignitepass dbname=ignite sslmode=disable"
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
@@ -97,6 +97,58 @@ func initDB() error {
 	}
 
 	log.Println("✅ Successfully connected to PostgreSQL database 'ignite'")
+	
+	// Run migrations
+	if err := runMigrations(); err != nil {
+		return fmt.Errorf("error running migrations: %v", err)
+	}
+	
+	return nil
+}
+
+func runMigrations() error {
+	migrations := []string{
+		`CREATE TABLE IF NOT EXISTS problem_statements (
+			id BIGSERIAL PRIMARY KEY,
+			reference_id VARCHAR(20) UNIQUE NOT NULL,
+			submitter_name VARCHAR(150) NOT NULL,
+			department_name VARCHAR(200) NOT NULL,
+			designation VARCHAR(150),
+			contact_number VARCHAR(20),
+			email VARCHAR(150) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			problem_description TEXT NOT NULL,
+			current_challenges TEXT,
+			expected_outcome TEXT,
+			submission_status VARCHAR(20) NOT NULL DEFAULT 'Active',
+			review_decision VARCHAR(20) NOT NULL DEFAULT 'Under Review',
+			assigned_admin_id BIGINT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_problem_status ON problem_statements(submission_status)`,
+		`CREATE INDEX IF NOT EXISTS idx_review_decision ON problem_statements(review_decision)`,
+		`CREATE INDEX IF NOT EXISTS idx_department ON problem_statements(department_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_created_at ON problem_statements(created_at)`,
+		`CREATE TABLE IF NOT EXISTS problem_documents (
+			id BIGSERIAL PRIMARY KEY,
+			problem_statement_id BIGINT NOT NULL REFERENCES problem_statements(id) ON DELETE CASCADE,
+			original_file_name VARCHAR(255),
+			stored_file_name VARCHAR(255),
+			file_type VARCHAR(20),
+			file_size BIGINT,
+			uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_problem_statement_id ON problem_documents(problem_statement_id)`,
+	}
+
+	for _, migration := range migrations {
+		if _, err := db.Exec(migration); err != nil {
+			return err
+		}
+	}
+	
+	log.Println("✅ Database migrations completed successfully")
 	return nil
 }
 
