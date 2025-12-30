@@ -203,29 +203,40 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req ProblemStatementRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	// Parse multipart form (max 10MB per file)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
+	// Extract form fields
+	submitterName := r.FormValue("submitter_name")
+	departmentName := r.FormValue("department_name")
+	designation := r.FormValue("designation")
+	contactNumber := r.FormValue("contact_number")
+	email := r.FormValue("email")
+	title := r.FormValue("title")
+	problemDescription := r.FormValue("problem_description")
+	currentChallenges := r.FormValue("current_challenges")
+	expectedOutcome := r.FormValue("expected_outcome")
+
 	// Validate required fields
-	if req.SubmitterName == "" || req.DepartmentName == "" || req.Email == "" || 
-	   req.Title == "" || req.ProblemDescription == "" {
+	if submitterName == "" || departmentName == "" || email == "" || 
+	   title == "" || problemDescription == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
 	}
 
 	// Validate character limits
-	if len(req.ProblemDescription) > 750 {
+	if len(problemDescription) > 750 {
 		http.Error(w, "Problem description exceeds 750 characters", http.StatusBadRequest)
 		return
 	}
-	if len(req.CurrentChallenges) > 1000 {
+	if len(currentChallenges) > 1000 {
 		http.Error(w, "Current challenges exceeds 1000 characters", http.StatusBadRequest)
 		return
 	}
-	if len(req.ExpectedOutcome) > 750 {
+	if len(expectedOutcome) > 750 {
 		http.Error(w, "Expected outcome exceeds 750 characters", http.StatusBadRequest)
 		return
 	}
@@ -252,15 +263,15 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow(
 		query,
 		referenceID,
-		req.SubmitterName,
-		req.DepartmentName,
-		req.Designation,
-		req.ContactNumber,
-		req.Email,
-		req.Title,
-		req.ProblemDescription,
-		req.CurrentChallenges,
-		req.ExpectedOutcome,
+		submitterName,
+		departmentName,
+		designation,
+		contactNumber,
+		email,
+		title,
+		problemDescription,
+		currentChallenges,
+		expectedOutcome,
 	).Scan(&problemStatement.ID, &problemStatement.CreatedAt)
 
 	if err != nil {
@@ -270,10 +281,10 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	problemStatement.ReferenceID = referenceID
-	problemStatement.SubmitterName = req.SubmitterName
-	problemStatement.DepartmentName = req.DepartmentName
-	problemStatement.Email = req.Email
-	problemStatement.Title = req.Title
+	problemStatement.SubmitterName = submitterName
+	problemStatement.DepartmentName = departmentName
+	problemStatement.Email = email
+	problemStatement.Title = title
 	problemStatement.SubmissionStatus = "Active"
 	problemStatement.ReviewDecision = "Under Review"
 
