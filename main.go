@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
 )
 
@@ -67,6 +69,36 @@ type ProblemDocument struct {
 	FileSize            int64     `json:"file_size"`
 	UploadedAt          time.Time `json:"uploaded_at"`
 }
+
+type AdminUser struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Email       string     `json:"email"`
+	Role        string     `json:"role"`
+	IsActive    bool       `json:"is_active"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type AdminRegisterRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type AdminLoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type AdminLoginResponse struct {
+	Success bool      `json:"success"`
+	Message string    `json:"message"`
+	Token   string    `json:"token,omitempty"`
+	Admin   AdminUser `json:"admin,omitempty"`
+}
+
+var jwtSecret = []byte("your-secret-key-change-this-in-production")
 
 var db *sql.DB
 
@@ -424,6 +456,143 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func adminRegisterHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AdminRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Hash password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert admin user
+	query := `
+		INSERT INTO admin_users (name, email, password_hash)
+		VALUES ($1, $2, $3)
+		RETURNING id, created_at
+	`
+
+	var admin AdminUser
+	err = db.QueryRow(query, req.Name, req.Email, string(hashedPassword)).Scan(&admin.ID, &admin.CreatedAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate") {
+			http.Error(w, "Email already exists", http.StatusConflict)
+			return
+		}
+		log.Printf("Error creating admin: %v", err)
+		http.Error(w, "Failed to create admin user", http.StatusInternalServerError)
+		return
+	}
+
+	admin.Name = req.Name
+	admin.Email = req.Email
+	admin.Role = "ADMIN"
+	admin.IsActive = true
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Admin user created successfully",
+		"admin":   admin,
+	})
+}
+
+func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AdminLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Get admin from database
+	query := `
+		SELECT id, name, email, password_hash, role, is_active, last_login_at, created_at
+		FROM admin_users
+		WHERE email = $1 AND is_active = true
+	`
+
+	var admin AdminUser
+	var passwordHash string
+	err := db.QueryRow(query, req.Email).Scan(
+		&admin.ID, &admin.Name, &admin.Email, &passwordHash,
+		&admin.Role, &admin.IsActive, &admin.LastLoginAt, &admin.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		log.Printf("Error fetching admin: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	// Update last login time
+	updateQuery := `UPDATE admin_users SET last_login_at = $1 WHERE id = $2`
+	now := time.Now()
+	db.Exec(updateQuery, now, admin.ID)
+	admin.LastLoginAt = &now
+
+	// Generate JWT token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"admin_id": admin.ID,
+		"email":    admin.Email,
+		"role":     admin.Role,
+		"exp":      time.Now().Add(24 * time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("Error generating token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(AdminLoginResponse{
+		Success: true,
+		Message: "Login successful",
+		Token:   tokenString,
+		Admin:   admin,
+	})
+}
+
 func main() {
 	// Initialize database connection
 	if err := initDB(); err != nil {
@@ -441,6 +610,8 @@ func main() {
 	mux.HandleFunc("/", enableCORS(helloHandler))
 	mux.HandleFunc("/health", enableCORS(healthHandler))
 	mux.HandleFunc("/api/problem-statements", enableCORS(createProblemStatementHandler))
+	mux.HandleFunc("/api/admin/register", enableCORS(adminRegisterHandler))
+	mux.HandleFunc("/api/admin/login", enableCORS(adminLoginHandler))
 	
 	port := ":5000"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
@@ -448,6 +619,8 @@ func main() {
 	fmt.Println("   GET  /        - Hello endpoint")
 	fmt.Println("   GET  /health  - Health check")
 	fmt.Println("   POST /api/problem-statements - Submit problem statement")
+	fmt.Println("   POST /api/admin/register - Admin registration")
+	fmt.Println("   POST /api/admin/login - Admin login")
 	fmt.Println("🗄️  Database: ignite (PostgreSQL)")
 	
 	if err := http.ListenAndServe(port, mux); err != nil {
