@@ -632,6 +632,67 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	adminID := r.Header.Get("X-Admin-ID")
+	adminEmail := r.Header.Get("X-Admin-Email")
+
+	// Get problem statements statistics
+	var totalProblems, activeProblems, underReview, accepted, rejected int
+	db.QueryRow("SELECT COUNT(*) FROM problem_statements").Scan(&totalProblems)
+	db.QueryRow("SELECT COUNT(*) FROM problem_statements WHERE submission_status = 'Active'").Scan(&activeProblems)
+	db.QueryRow("SELECT COUNT(*) FROM problem_statements WHERE review_decision = 'Under Review'").Scan(&underReview)
+	db.QueryRow("SELECT COUNT(*) FROM problem_statements WHERE review_decision = 'Accepted'").Scan(&accepted)
+	db.QueryRow("SELECT COUNT(*) FROM problem_statements WHERE review_decision = 'Rejected'").Scan(&rejected)
+
+	// Get recent submissions
+	recentQuery := `
+		SELECT id, reference_id, submitter_name, department_name, title, 
+		       submission_status, review_decision, created_at
+		FROM problem_statements
+		ORDER BY created_at DESC
+		LIMIT 10
+	`
+
+	rows, err := db.Query(recentQuery)
+	if err != nil {
+		log.Printf("Error fetching recent submissions: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	recentSubmissions := []ProblemStatement{}
+	for rows.Next() {
+		var ps ProblemStatement
+		err := rows.Scan(
+			&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
+			&ps.Title, &ps.SubmissionStatus, &ps.ReviewDecision, &ps.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning row: %v", err)
+			continue
+		}
+		recentSubmissions = append(recentSubmissions, ps)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"admin": map[string]string{
+			"id":    adminID,
+			"email": adminEmail,
+		},
+		"statistics": map[string]int{
+			"total_problems":   totalProblems,
+			"active_problems":  activeProblems,
+			"under_review":     underReview,
+			"accepted":         accepted,
+			"rejected":         rejected,
+		},
+		"recent_submissions": recentSubmissions,
+	})
+}
+
 func main() {
 	// Initialize database connection
 	if err := initDB(); err != nil {
@@ -651,6 +712,7 @@ func main() {
 	mux.HandleFunc("/api/problem-statements", enableCORS(createProblemStatementHandler))
 	mux.HandleFunc("/api/admin/register", enableCORS(adminRegisterHandler))
 	mux.HandleFunc("/api/admin/login", enableCORS(adminLoginHandler))
+	mux.HandleFunc("/api/admin/dashboard", enableCORS(authenticateAdmin(adminDashboardHandler)))
 	
 	port := ":5000"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
@@ -660,6 +722,7 @@ func main() {
 	fmt.Println("   POST /api/problem-statements - Submit problem statement")
 	fmt.Println("   POST /api/admin/register - Admin registration")
 	fmt.Println("   POST /api/admin/login - Admin login")
+	fmt.Println("   GET  /api/admin/dashboard - Admin dashboard (protected)")
 	fmt.Println("🗄️  Database: ignite (PostgreSQL)")
 	
 	if err := http.ListenAndServe(port, mux); err != nil {
