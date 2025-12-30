@@ -194,6 +194,18 @@ func runMigrations() error {
 			uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_problem_statement_id ON problem_documents(problem_statement_id)`,
+		`CREATE TABLE IF NOT EXISTS admin_users (
+			id BIGSERIAL PRIMARY KEY,
+			name VARCHAR(150),
+			email VARCHAR(150) UNIQUE NOT NULL,
+			password_hash TEXT NOT NULL,
+			role VARCHAR(50) DEFAULT 'ADMIN',
+			is_active BOOLEAN DEFAULT TRUE,
+			last_login_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_email ON admin_users(email)`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_active ON admin_users(is_active)`,
 	}
 
 	for _, migration := range migrations {
