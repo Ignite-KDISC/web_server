@@ -117,6 +117,45 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func authenticateAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract token from "Bearer <token>"
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+			return
+		}
+
+		// Parse and validate token
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method")
+			}
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract claims and add to request context
+		if claims, ok := token.Claims.(jwt.MapClaims); ok {
+			r.Header.Set("X-Admin-ID", fmt.Sprintf("%.0f", claims["admin_id"]))
+			r.Header.Set("X-Admin-Email", claims["email"].(string))
+			r.Header.Set("X-Admin-Role", claims["role"].(string))
+		}
+
+		next(w, r)
+	}
+}
+
 func generateReferenceID() (string, error) {
 	year := time.Now().Year()
 	
