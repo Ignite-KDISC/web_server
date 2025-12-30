@@ -52,6 +52,16 @@ type ProblemStatementRequest struct {
 	ExpectedOutcome    string `json:"expected_outcome"`
 }
 
+type ProblemDocument struct {
+	ID                  int64     `json:"id"`
+	ProblemStatementID  int64     `json:"problem_statement_id"`
+	OriginalFileName    string    `json:"original_file_name"`
+	StoredFileName      string    `json:"stored_file_name"`
+	FileType            string    `json:"file_type"`
+	FileSize            int64     `json:"file_size"`
+	UploadedAt          time.Time `json:"uploaded_at"`
+}
+
 var db *sql.DB
 
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
