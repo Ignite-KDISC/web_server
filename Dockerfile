@@ -1,5 +1,4 @@
-
-FROM golang:1.21-alpine
+FROM golang:1.22.2-alpine
 
 WORKDIR /app
 
@@ -15,4 +14,4 @@ RUN go build -o main .
 EXPOSE 8080
 
 # Start the application
-CMD ["./main"]
+CMD ["/app/main"]
