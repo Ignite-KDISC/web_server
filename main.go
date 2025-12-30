@@ -332,6 +332,75 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	problemStatement.SubmissionStatus = "Active"
 	problemStatement.ReviewDecision = "Under Review"
 
+	// Handle file uploads
+	uploadedFiles := []ProblemDocument{}
+	files := r.MultipartForm.File["documents"]
+	
+	for _, fileHeader := range files {
+		// Validate file type
+		if !isValidFileType(fileHeader.Filename) {
+			log.Printf("Invalid file type: %s", fileHeader.Filename)
+			continue
+		}
+
+		// Open uploaded file
+		file, err := fileHeader.Open()
+		if err != nil {
+			log.Printf("Error opening file %s: %v", fileHeader.Filename, err)
+			continue
+		}
+		defer file.Close()
+
+		// Read file content
+		fileContent, err := io.ReadAll(file)
+		if err != nil {
+			log.Printf("Error reading file %s: %v", fileHeader.Filename, err)
+			continue
+		}
+
+		// Save file to disk
+		storedFileName, err := saveUploadedFile(fileContent, fileHeader.Filename, problemStatement.ID)
+		if err != nil {
+			log.Printf("Error saving file %s: %v", fileHeader.Filename, err)
+			continue
+		}
+
+		// Get file extension for type
+		fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileHeader.Filename)), ".")
+
+		// Insert file metadata into database
+		docQuery := `
+			INSERT INTO problem_documents (
+				problem_statement_id, original_file_name, stored_file_name, 
+				file_type, file_size
+			) VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, uploaded_at
+		`
+
+		var doc ProblemDocument
+		err = db.QueryRow(
+			docQuery,
+			problemStatement.ID,
+			fileHeader.Filename,
+			storedFileName,
+			fileType,
+			fileHeader.Size,
+		).Scan(&doc.ID, &doc.UploadedAt)
+
+		if err != nil {
+			log.Printf("Error saving file metadata for %s: %v", fileHeader.Filename, err)
+			continue
+		}
+
+		doc.ProblemStatementID = problemStatement.ID
+		doc.OriginalFileName = fileHeader.Filename
+		doc.StoredFileName = storedFileName
+		doc.FileType = fileType
+		doc.FileSize = fileHeader.Size
+
+		uploadedFiles = append(uploadedFiles, doc)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -339,6 +408,7 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		"message":      "Problem statement submitted successfully",
 		"reference_id": referenceID,
 		"data":         problemStatement,
+		"files":        uploadedFiles,
 	})
 }
 
