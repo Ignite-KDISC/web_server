@@ -1007,6 +1007,56 @@ func serveUploadedFileHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
+func updateReviewDecisionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID             int64  `json:"id"`
+		ReviewDecision string `json:"review_decision"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate review decision
+	validDecisions := map[string]bool{
+		"Under Review": true,
+		"Accepted":     true,
+		"Rejected":     true,
+	}
+
+	if !validDecisions[req.ReviewDecision] {
+		http.Error(w, "Invalid review decision", http.StatusBadRequest)
+		return
+	}
+
+	// Update in database
+	query := `UPDATE problem_statements SET review_decision = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
+	result, err := db.Exec(query, req.ReviewDecision, req.ID)
+	if err != nil {
+		log.Printf("Error updating review decision: %v", err)
+		http.Error(w, "Failed to update review decision", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Problem statement not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Review decision updated successfully",
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
