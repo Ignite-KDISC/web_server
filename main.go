@@ -856,6 +856,63 @@ func getProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func getProblemDocumentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get problem statement ID from query parameter
+	idStr := r.URL.Query().Get("problem_id")
+	if idStr == "" {
+		http.Error(w, "Missing problem_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	var problemID int64
+	if _, err := fmt.Sscanf(idStr, "%d", &problemID); err != nil {
+		http.Error(w, "Invalid problem_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch documents for this problem statement
+	query := `
+		SELECT id, problem_statement_id, original_file_name, stored_file_name,
+		       file_type, file_size, uploaded_at
+		FROM problem_documents
+		WHERE problem_statement_id = $1
+		ORDER BY uploaded_at DESC
+	`
+
+	rows, err := db.Query(query, problemID)
+	if err != nil {
+		log.Printf("Error fetching problem documents: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	documents := []ProblemDocument{}
+	for rows.Next() {
+		var doc ProblemDocument
+		err := rows.Scan(
+			&doc.ID, &doc.ProblemStatementID, &doc.OriginalFileName,
+			&doc.StoredFileName, &doc.FileType, &doc.FileSize, &doc.UploadedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning document: %v", err)
+			continue
+		}
+		documents = append(documents, doc)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"documents": documents,
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
@@ -886,6 +943,7 @@ func main() {
 	mux.HandleFunc("/api/admin/dashboard", enableCORS(authenticateAdmin(adminDashboardHandler)))
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
+	mux.HandleFunc("/api/admin/problem-documents", enableCORS(authenticateAdmin(getProblemDocumentsHandler)))
 	
 	port := ":8080"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
