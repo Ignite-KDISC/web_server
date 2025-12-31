@@ -1300,6 +1300,119 @@ func exportProblemsCSVHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check if user exists
+	var userID int64
+	err := db.QueryRow("SELECT id FROM admin_users WHERE email = $1", req.Email).Scan(&userID)
+	if err != nil {
+		// Don't reveal if email exists or not for security
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "If the email exists, a reset link will be sent",
+		})
+		return
+	}
+
+	// Generate reset token
+	token := fmt.Sprintf("%x", time.Now().UnixNano())
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	// Store token in database
+	query := `INSERT INTO password_reset_tokens (admin_user_id, token, expires_at, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`
+	_, err = db.Exec(query, userID, token, expiresAt)
+	if err != nil {
+		log.Printf("Error storing reset token: %v", err)
+		http.Error(w, "Failed to process request", http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: Send email with reset link
+	log.Printf("Password reset token for %s: %s", req.Email, token)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "If the email exists, a reset link will be sent",
+		"token":   token, // Remove this in production
+	})
+}
+
+func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify token
+	var adminUserID int64
+	var expiresAt time.Time
+	var used bool
+
+	query := `SELECT admin_user_id, expires_at, used FROM password_reset_tokens WHERE token = $1`
+	err := db.QueryRow(query, req.Token).Scan(&adminUserID, &expiresAt, &used)
+	if err != nil {
+		http.Error(w, "Invalid or expired token", http.StatusBadRequest)
+		return
+	}
+
+	if used || time.Now().After(expiresAt) {
+		http.Error(w, "Invalid or expired token", http.StatusBadRequest)
+		return
+	}
+
+	// Hash new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to process password", http.StatusInternalServerError)
+		return
+	}
+
+	// Update password
+	_, err = db.Exec("UPDATE admin_users SET password = $1 WHERE id = $2", string(hashedPassword), adminUserID)
+	if err != nil {
+		log.Printf("Error updating password: %v", err)
+		http.Error(w, "Failed to update password", http.StatusInternalServerError)
+		return
+	}
+
+	// Mark token as used
+	_, err = db.Exec("UPDATE password_reset_tokens SET used = TRUE WHERE token = $1", req.Token)
+	if err != nil {
+		log.Printf("Error marking token as used: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Password reset successfully",
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
