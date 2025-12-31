@@ -1315,6 +1315,50 @@ func exportProblemsCSVHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func assignToReviewerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID               int64  `json:"id"`
+		AssignedReviewer string `json:"assigned_reviewer"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Update assignment in database
+	query := `UPDATE problem_statements SET assigned_reviewer = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
+	result, err := db.Exec(query, req.AssignedReviewer, req.ID)
+	if err != nil {
+		log.Printf("Error assigning reviewer: %v", err)
+		http.Error(w, "Failed to assign reviewer", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Problem statement not found", http.StatusNotFound)
+		return
+	}
+
+	// Log audit action
+	adminEmail := r.Context().Value("admin_email").(string)
+	adminID := r.Context().Value("admin_id").(int64)
+	details := fmt.Sprintf("Assigned to reviewer: %s", req.AssignedReviewer)
+	go logAuditAction(adminID, adminEmail, "ASSIGN_REVIEWER", "problem_statement", req.ID, details)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Reviewer assigned successfully",
+	})
+}
+
 func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
