@@ -1139,6 +1139,7 @@ func main() {
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
 	mux.HandleFunc("/api/admin/problem-documents", enableCORS(authenticateAdmin(getProblemDocumentsHandler)))
 	mux.HandleFunc("/api/admin/update-review-decision", enableCORS(authenticateAdmin(updateReviewDecisionHandler)))
+	mux.HandleFunc("/api/admin/update-submission-status", enableCORS(authenticateAdmin(updateSubmissionStatusHandler)))
 	mux.HandleFunc("/uploads/", enableCORS(serveUploadedFileHandler))
 	
 	port := ":8080"
