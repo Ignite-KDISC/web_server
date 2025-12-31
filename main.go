@@ -1210,6 +1210,42 @@ func addInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func deleteInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID int64 `json:"id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	query := `DELETE FROM internal_remarks WHERE id = $1`
+	result, err := db.Exec(query, req.ID)
+	if err != nil {
+		log.Printf("Error deleting internal remark: %v", err)
+		http.Error(w, "Failed to delete internal remark", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Remark not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Internal remark deleted successfully",
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
