@@ -210,7 +210,33 @@ func saveUploadedFile(fileContent []byte, originalName string, problemID int64) 
 }
 
 func initDB() error {
-	connStr := "host=postgres port=5432 user=igniteuser password=ignitepass dbname=ignite sslmode=disable"
+	// Read database configuration from environment variables
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "localhost"
+	}
+	dbPort := os.Getenv("DB_PORT")
+	if dbPort == "" {
+		dbPort = "5432"
+	}
+	dbUser := os.Getenv("DB_USER")
+	if dbUser == "" {
+		dbUser = "igniteuser"
+	}
+	dbPassword := os.Getenv("DB_PASSWORD")
+	if dbPassword == "" {
+		dbPassword = "ignitepass"
+	}
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "ignite"
+	}
+
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		dbHost, dbPort, dbUser, dbPassword, dbName)
+	
+	log.Printf("📡 Connecting to PostgreSQL at %s:%s...", dbHost, dbPort)
+	
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
@@ -694,6 +720,14 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Create uploads directory if it doesn't exist
+	uploadsDir := "./uploads"
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		log.Printf("⚠️  Warning: Could not create uploads directory: %v", err)
+	} else {
+		log.Printf("✅ Uploads directory ready: %s", uploadsDir)
+	}
+
 	// Initialize database connection
 	if err := initDB(); err != nil {
 		log.Printf("⚠️  Warning: %v", err)
