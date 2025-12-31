@@ -1109,6 +1109,12 @@ func updateSubmissionStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log audit action
+	adminEmail := r.Context().Value("admin_email").(string)
+	adminID := r.Context().Value("admin_id").(int64)
+	details := fmt.Sprintf("Changed submission status to: %s", req.SubmissionStatus)
+	go logAuditAction(adminID, adminEmail, "UPDATE_SUBMISSION_STATUS", "problem_statement", req.ID, details)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
