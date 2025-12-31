@@ -1336,6 +1336,7 @@ func main() {
 	mux.HandleFunc("/api/admin/internal-remarks", enableCORS(authenticateAdmin(getInternalRemarksHandler)))
 	mux.HandleFunc("/api/admin/add-internal-remark", enableCORS(authenticateAdmin(addInternalRemarkHandler)))
 	mux.HandleFunc("/api/admin/delete-internal-remark", enableCORS(authenticateAdmin(deleteInternalRemarkHandler)))
+	mux.HandleFunc("/api/admin/export-csv", enableCORS(authenticateAdmin(exportProblemsCSVHandler)))
 	mux.HandleFunc("/uploads/", enableCORS(serveUploadedFileHandler))
 	
 	port := ":8080"
