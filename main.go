@@ -1166,6 +1166,50 @@ func getInternalRemarksHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func addInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ProblemStatementID int64  `json:"problem_statement_id"`
+		RemarkText         string `json:"remark_text"`
+		CreatedBy          string `json:"created_by"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.RemarkText == "" || req.CreatedBy == "" {
+		http.Error(w, "remark_text and created_by are required", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		INSERT INTO internal_remarks (problem_statement_id, remark_text, created_by, created_at, updated_at)
+		VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		RETURNING id
+	`
+
+	var remarkID int64
+	err := db.QueryRow(query, req.ProblemStatementID, req.RemarkText, req.CreatedBy).Scan(&remarkID)
+	if err != nil {
+		log.Printf("Error adding internal remark: %v", err)
+		http.Error(w, "Failed to add internal remark", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"remark_id": remarkID,
+		"message":   "Internal remark added successfully",
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
