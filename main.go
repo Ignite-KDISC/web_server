@@ -1107,6 +1107,65 @@ func updateSubmissionStatusHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func getInternalRemarksHandler(w http.ResponseWriter, r *http.Request) {
+	problemIDStr := r.URL.Query().Get("problem_id")
+	if problemIDStr == "" {
+		http.Error(w, "problem_id is required", http.StatusBadRequest)
+		return
+	}
+
+	problemID, err := strconv.ParseInt(problemIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid problem_id", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		SELECT id, problem_statement_id, remark_text, created_by, created_at, updated_at
+		FROM internal_remarks
+		WHERE problem_statement_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := db.Query(query, problemID)
+	if err != nil {
+		log.Printf("Error fetching internal remarks: %v", err)
+		http.Error(w, "Failed to fetch internal remarks", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var remarks []map[string]interface{}
+	for rows.Next() {
+		var id, problemStatementID int64
+		var remarkText, createdBy string
+		var createdAt, updatedAt time.Time
+
+		if err := rows.Scan(&id, &problemStatementID, &remarkText, &createdBy, &createdAt, &updatedAt); err != nil {
+			log.Printf("Error scanning remark: %v", err)
+			continue
+		}
+
+		remarks = append(remarks, map[string]interface{}{
+			"id":                     id,
+			"problem_statement_id":   problemStatementID,
+			"remark_text":            remarkText,
+			"created_by":             createdBy,
+			"created_at":             createdAt,
+			"updated_at":             updatedAt,
+		})
+	}
+
+	if remarks == nil {
+		remarks = []map[string]interface{}{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"remarks": remarks,
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
