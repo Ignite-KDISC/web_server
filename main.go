@@ -578,6 +578,9 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		uploadedFiles = append(uploadedFiles, doc)
 	}
 
+	// Send acknowledgment email
+	go sendAcknowledgmentEmail(problemStatement.Email, problemStatement.SubmitterName, problemStatement.ReferenceID)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1050,6 +1053,12 @@ func updateReviewDecisionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log audit action
+	adminEmail := r.Context().Value("admin_email").(string)
+	adminID := r.Context().Value("admin_id").(int64)
+	details := fmt.Sprintf("Changed review decision to: %s", req.ReviewDecision)
+	go logAuditAction(adminID, adminEmail, "UPDATE_REVIEW_DECISION", "problem_statement", req.ID, details)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1435,6 +1444,17 @@ IGNIET Team
 `, name, referenceID)
 	
 	log.Printf("Email body: %s", emailBody)
+}
+
+func logAuditAction(adminUserID int64, adminEmail, action, entityType string, entityID int64, details string) {
+	query := `
+		INSERT INTO audit_logs (admin_user_id, admin_email, action, entity_type, entity_id, details, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+	`
+	_, err := db.Exec(query, adminUserID, adminEmail, action, entityType, entityID, details)
+	if err != nil {
+		log.Printf("Error logging audit action: %v", err)
+	}
 }
 
 func main() {
