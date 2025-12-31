@@ -803,6 +803,59 @@ func listProblemStatementsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func getProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get ID from query parameter
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "Missing id parameter", http.StatusBadRequest)
+		return
+	}
+
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		http.Error(w, "Invalid id parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch problem statement
+	query := `
+		SELECT id, reference_id, submitter_name, department_name, designation,
+		       contact_number, email, title, problem_description, current_challenges,
+		       expected_outcome, submission_status, review_decision, created_at
+		FROM problem_statements
+		WHERE id = $1
+	`
+
+	var ps ProblemStatement
+	err := db.QueryRow(query, id).Scan(
+		&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
+		&ps.Designation, &ps.ContactNumber, &ps.Email, &ps.Title,
+		&ps.ProblemDescription, &ps.CurrentChallenges, &ps.ExpectedOutcome,
+		&ps.SubmissionStatus, &ps.ReviewDecision, &ps.CreatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Problem statement not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching problem statement: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":           true,
+		"problem_statement": ps,
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
@@ -832,6 +885,7 @@ func main() {
 	mux.HandleFunc("/api/admin/login", enableCORS(adminLoginHandler))
 	mux.HandleFunc("/api/admin/dashboard", enableCORS(authenticateAdmin(adminDashboardHandler)))
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
+	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
 	
 	port := ":8080"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
