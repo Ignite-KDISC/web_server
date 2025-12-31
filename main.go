@@ -913,6 +913,32 @@ func getProblemDocumentsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func serveUploadedFileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get filename from URL path
+	filename := r.URL.Path[len("/uploads/"):]
+	if filename == "" {
+		http.Error(w, "Missing filename", http.StatusBadRequest)
+		return
+	}
+
+	// Construct file path
+	filePath := filepath.Join("/app/uploads", filename)
+
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Serve the file
+	http.ServeFile(w, r, filePath)
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
@@ -944,6 +970,7 @@ func main() {
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
 	mux.HandleFunc("/api/admin/problem-documents", enableCORS(authenticateAdmin(getProblemDocumentsHandler)))
+	mux.HandleFunc("/uploads/", enableCORS(serveUploadedFileHandler))
 	
 	port := ":8080"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
