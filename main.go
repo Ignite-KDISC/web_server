@@ -303,6 +303,74 @@ func runMigrations() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_email ON admin_users(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_active ON admin_users(is_active)`,
+		`CREATE TABLE IF NOT EXISTS internal_remarks (
+			id BIGSERIAL PRIMARY KEY,
+			problem_statement_id BIGINT NOT NULL REFERENCES problem_statements(id) ON DELETE CASCADE,
+			admin_id BIGINT NOT NULL REFERENCES admin_users(id),
+			remark TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_internal_remarks_problem ON internal_remarks(problem_statement_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_internal_remarks_admin ON internal_remarks(admin_id)`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id BIGSERIAL PRIMARY KEY,
+			admin_id BIGINT NULL REFERENCES admin_users(id),
+			action_type VARCHAR(100) NOT NULL,
+			entity_type VARCHAR(100),
+			entity_id BIGINT,
+			description TEXT,
+			ip_address VARCHAR(45),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON audit_logs(admin_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+		`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+			id BIGSERIAL PRIMARY KEY,
+			admin_id BIGINT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+			token VARCHAR(255) UNIQUE NOT NULL,
+			expires_at TIMESTAMP NOT NULL,
+			is_used BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_password_reset_token ON password_reset_tokens(token)`,
+		`CREATE INDEX IF NOT EXISTS idx_password_reset_admin ON password_reset_tokens(admin_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_password_reset_expires ON password_reset_tokens(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS export_logs (
+			id BIGSERIAL PRIMARY KEY,
+			admin_id BIGINT REFERENCES admin_users(id),
+			export_type VARCHAR(20),
+			applied_filters JSONB,
+			record_count INT,
+			exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_export_logs_admin ON export_logs(admin_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_export_logs_type ON export_logs(export_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_export_logs_exported ON export_logs(exported_at)`,
+		`CREATE TABLE IF NOT EXISTS submission_status_enum (
+			id SERIAL PRIMARY KEY,
+			status_name VARCHAR(50) UNIQUE NOT NULL,
+			description TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`INSERT INTO submission_status_enum (status_name, description) VALUES
+			('Active', 'Problem statement is currently active'),
+			('PoC', 'Proof of Concept stage'),
+			('Closed', 'Problem statement is closed')
+		ON CONFLICT (status_name) DO NOTHING`,
+		`CREATE TABLE IF NOT EXISTS review_decision_enum (
+			id SERIAL PRIMARY KEY,
+			decision_name VARCHAR(50) UNIQUE NOT NULL,
+			description TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`INSERT INTO review_decision_enum (decision_name, description) VALUES
+			('Under Review', 'Submission is under review'),
+			('Accepted', 'Submission has been accepted'),
+			('Rejected', 'Submission has been rejected')
+		ON CONFLICT (decision_name) DO NOTHING`,
 	}
 
 	for _, migration := range migrations {
