@@ -719,6 +719,90 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func listProblemStatementsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get pagination parameters
+	page := 1
+	limit := 10
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := fmt.Sscanf(pageStr, "%d", &page); err == nil && p == 1 && page > 0 {
+			// page is valid
+		} else {
+			page = 1
+		}
+	}
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := fmt.Sscanf(limitStr, "%d", &limit); err == nil && l == 1 && limit > 0 && limit <= 100 {
+			// limit is valid
+		} else {
+			limit = 10
+		}
+	}
+
+	offset := (page - 1) * limit
+
+	// Get total count
+	var totalCount int
+	err := db.QueryRow("SELECT COUNT(*) FROM problem_statements").Scan(&totalCount)
+	if err != nil {
+		log.Printf("Error counting problem statements: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Get paginated problem statements
+	query := `
+		SELECT id, reference_id, submitter_name, department_name, designation,
+		       contact_number, email, title, problem_description, current_challenges,
+		       expected_outcome, submission_status, review_decision, created_at
+		FROM problem_statements
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := db.Query(query, limit, offset)
+	if err != nil {
+		log.Printf("Error fetching problem statements: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	problemStatements := []ProblemStatement{}
+	for rows.Next() {
+		var ps ProblemStatement
+		err := rows.Scan(
+			&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
+			&ps.Designation, &ps.ContactNumber, &ps.Email, &ps.Title,
+			&ps.ProblemDescription, &ps.CurrentChallenges, &ps.ExpectedOutcome,
+			&ps.SubmissionStatus, &ps.ReviewDecision, &ps.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning problem statement: %v", err)
+			continue
+		}
+		problemStatements = append(problemStatements, ps)
+	}
+
+	totalPages := (totalCount + limit - 1) / limit
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":            true,
+		"problem_statements": problemStatements,
+		"pagination": map[string]int{
+			"page":        page,
+			"limit":       limit,
+			"total_count": totalCount,
+			"total_pages": totalPages,
+		},
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
@@ -747,6 +831,7 @@ func main() {
 	mux.HandleFunc("/api/admin/register", enableCORS(adminRegisterHandler))
 	mux.HandleFunc("/api/admin/login", enableCORS(adminLoginHandler))
 	mux.HandleFunc("/api/admin/dashboard", enableCORS(authenticateAdmin(adminDashboardHandler)))
+	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	
 	port := ":8080"
 	fmt.Printf("🚀 Server starting on http://localhost%s\n", port)
