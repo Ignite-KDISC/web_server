@@ -1057,6 +1057,56 @@ func updateReviewDecisionHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func updateSubmissionStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID               int64  `json:"id"`
+		SubmissionStatus string `json:"submission_status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate submission status
+	validStatuses := map[string]bool{
+		"Active": true,
+		"PoC":    true,
+		"Closed": true,
+	}
+
+	if !validStatuses[req.SubmissionStatus] {
+		http.Error(w, "Invalid submission status", http.StatusBadRequest)
+		return
+	}
+
+	// Update in database
+	query := `UPDATE problem_statements SET submission_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
+	result, err := db.Exec(query, req.SubmissionStatus, req.ID)
+	if err != nil {
+		log.Printf("Error updating submission status: %v", err)
+		http.Error(w, "Failed to update submission status", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Problem statement not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Submission status updated successfully",
+	})
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
