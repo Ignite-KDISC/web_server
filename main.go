@@ -1246,6 +1246,60 @@ func deleteInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func exportProblemsCSVHandler(w http.ResponseWriter, r *http.Request) {
+	query := `
+		SELECT id, reference_id, submitter_name, department_name, designation, contact_number, email,
+		       title, problem_description, submission_status, review_decision, created_at
+		FROM problem_statements
+		ORDER BY created_at DESC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Printf("Error fetching problems for export: %v", err)
+		http.Error(w, "Failed to export problems", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=problem_statements.csv")
+
+	// Write CSV header
+	fmt.Fprintf(w, "Reference ID,Submitter Name,Department,Designation,Contact,Email,Title,Description,Status,Decision,Created At\n")
+
+	// Write CSV rows
+	for rows.Next() {
+		var id int64
+		var refID, submitterName, deptName, designation, contact, email, title, desc, status, decision string
+		var createdAt time.Time
+
+		if err := rows.Scan(&id, &refID, &submitterName, &deptName, &designation, &contact, &email, &title, &desc, &status, &decision, &createdAt); err != nil {
+			log.Printf("Error scanning row: %v", err)
+			continue
+		}
+
+		// Escape quotes in CSV fields
+		escapeCSV := func(s string) string {
+			return "\"" + s + "\""
+		}
+
+		fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+			escapeCSV(refID),
+			escapeCSV(submitterName),
+			escapeCSV(deptName),
+			escapeCSV(designation),
+			escapeCSV(contact),
+			escapeCSV(email),
+			escapeCSV(title),
+			escapeCSV(desc),
+			escapeCSV(status),
+			escapeCSV(decision),
+			escapeCSV(createdAt.Format("2006-01-02 15:04:05")),
+		)
+	}
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
