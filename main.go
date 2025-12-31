@@ -1413,6 +1413,30 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func sendAcknowledgmentEmail(email, name, referenceID string) {
+	// TODO: Implement actual email sending using SMTP
+	// For now, just log the email
+	log.Printf("Would send acknowledgment email to %s (Name: %s, Ref: %s)", email, name, referenceID)
+	
+	// Example email content:
+	emailBody := fmt.Sprintf(`
+Dear %s,
+
+Thank you for submitting your problem statement to IGNIET.
+
+Your submission has been received successfully with the following reference ID: %s
+
+Our team will review your submission and get back to you within 5-7 business days.
+
+You can track the status of your submission by contacting our team with the reference ID.
+
+Best regards,
+IGNIET Team
+`, name, referenceID)
+	
+	log.Printf("Email body: %s", emailBody)
+}
+
 func main() {
 	// Create uploads directory if it doesn't exist
 	uploadsDir := "./uploads"
