@@ -18,6 +18,7 @@ func main() {
 	// Command line flags
 	name := flag.String("name", "", "Admin user's name")
 	email := flag.String("email", "", "Admin user's email (required)")
+	passwordFlag := flag.String("password", "", "Admin user's password (optional, will prompt if not provided)")
 	role := flag.String("role", "ADMIN", "Admin user's role (default: ADMIN)")
 	
 	// Database connection flags
@@ -37,29 +38,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Prompt for password securely
-	fmt.Print("Enter password: ")
-	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		log.Fatalf("Error reading password: %v", err)
-	}
-	fmt.Println()
+	var password string
 
-	password := strings.TrimSpace(string(passwordBytes))
-	if len(password) < 8 {
-		log.Fatal("Error: password must be at least 8 characters")
-	}
+	// Check if password was provided via flag
+	if *passwordFlag != "" {
+		password = *passwordFlag
+		if len(password) < 8 {
+			log.Fatal("Error: password must be at least 8 characters")
+		}
+	} else {
+		// Prompt for password securely
+		fmt.Print("Enter password: ")
+		passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			log.Fatalf("Error reading password: %v", err)
+		}
+		fmt.Println()
 
-	// Confirm password
-	fmt.Print("Confirm password: ")
-	confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		log.Fatalf("Error reading password confirmation: %v", err)
-	}
-	fmt.Println()
+		password = strings.TrimSpace(string(passwordBytes))
+		if len(password) < 8 {
+			log.Fatal("Error: password must be at least 8 characters")
+		}
 
-	if password != strings.TrimSpace(string(confirmBytes)) {
-		log.Fatal("Error: passwords do not match")
+		// Confirm password
+		fmt.Print("Confirm password: ")
+		confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			log.Fatalf("Error reading password confirmation: %v", err)
+		}
+		fmt.Println()
+
+		if password != strings.TrimSpace(string(confirmBytes)) {
+			log.Fatal("Error: passwords do not match")
+		}
 	}
 
 	// Hash the password
