@@ -831,7 +831,7 @@ func listProblemStatementsHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT id, reference_id, submitter_name, department_name, designation,
 		       contact_number, email, title, problem_description, current_challenges,
-		       expected_outcome, submission_status, review_decision, created_at
+		       expected_outcome, submission_status, review_decision, assigned_reviewer, created_at
 		FROM problem_statements
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -852,7 +852,7 @@ func listProblemStatementsHandler(w http.ResponseWriter, r *http.Request) {
 			&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
 			&ps.Designation, &ps.ContactNumber, &ps.Email, &ps.Title,
 			&ps.ProblemDescription, &ps.CurrentChallenges, &ps.ExpectedOutcome,
-			&ps.SubmissionStatus, &ps.ReviewDecision, &ps.CreatedAt,
+			&ps.SubmissionStatus, &ps.ReviewDecision, &ps.AssignedReviewer, &ps.CreatedAt,
 		)
 		if err != nil {
 			log.Printf("Error scanning problem statement: %v", err)
@@ -899,7 +899,7 @@ func getProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT id, reference_id, submitter_name, department_name, designation,
 		       contact_number, email, title, problem_description, current_challenges,
-		       expected_outcome, submission_status, review_decision, created_at
+		       expected_outcome, submission_status, review_decision, assigned_reviewer, created_at
 		FROM problem_statements
 		WHERE id = $1
 	`
@@ -909,7 +909,7 @@ func getProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
 		&ps.Designation, &ps.ContactNumber, &ps.Email, &ps.Title,
 		&ps.ProblemDescription, &ps.CurrentChallenges, &ps.ExpectedOutcome,
-		&ps.SubmissionStatus, &ps.ReviewDecision, &ps.CreatedAt,
+		&ps.SubmissionStatus, &ps.ReviewDecision, &ps.AssignedReviewer, &ps.CreatedAt,
 	)
 
 	if err != nil {
