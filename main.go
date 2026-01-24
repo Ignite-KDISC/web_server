@@ -46,6 +46,7 @@ type ProblemStatement struct {
 	ExpectedOutcome    string    `json:"expected_outcome"`
 	SubmissionStatus   string    `json:"submission_status"`
 	ReviewDecision     string    `json:"review_decision"`
+	AssignedReviewer   *string   `json:"assigned_reviewer"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 
