@@ -1328,22 +1328,51 @@ func assignToReviewerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Invalid request body",
+		})
 		return
 	}
+
+	// Validate ID
+	if req.ID <= 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Invalid problem statement ID",
+		})
+		return
+	}
+
+	// Trim whitespace from reviewer
+	req.AssignedReviewer = strings.TrimSpace(req.AssignedReviewer)
 
 	// Update assignment in database
 	query := `UPDATE problem_statements SET assigned_reviewer = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
 	result, err := db.Exec(query, req.AssignedReviewer, req.ID)
 	if err != nil {
 		log.Printf("Error assigning reviewer: %v", err)
-		http.Error(w, "Failed to assign reviewer", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Failed to assign reviewer",
+		})
 		return
 	}
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		http.Error(w, "Problem statement not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Problem statement not found",
+		})
 		return
 	}
 
@@ -1355,8 +1384,9 @@ func assignToReviewerHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Reviewer assigned successfully",
+		"success":           true,
+		"message":           "Reviewer assigned successfully",
+		"assigned_reviewer": req.AssignedReviewer,
 	})
 }
 
