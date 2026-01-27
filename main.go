@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -119,6 +120,14 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+type contextKey string
+
+const (
+	contextKeyAdminID    contextKey = "admin_id"
+	contextKeyAdminEmail contextKey = "admin_email"
+	contextKeyAdminRole  contextKey = "admin_role"
+)
+
 func authenticateAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Allow OPTIONS requests to pass through for CORS preflight
@@ -155,9 +164,11 @@ func authenticateAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 		// Extract claims and add to request context
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			r.Header.Set("X-Admin-ID", fmt.Sprintf("%.0f", claims["admin_id"]))
-			r.Header.Set("X-Admin-Email", claims["email"].(string))
-			r.Header.Set("X-Admin-Role", claims["role"].(string))
+			ctx := r.Context()
+			ctx = context.WithValue(ctx, contextKeyAdminID, int64(claims["admin_id"].(float64)))
+			ctx = context.WithValue(ctx, contextKeyAdminEmail, claims["email"].(string))
+			ctx = context.WithValue(ctx, contextKeyAdminRole, claims["role"].(string))
+			r = r.WithContext(ctx)
 		}
 
 		next(w, r)
@@ -1112,8 +1123,8 @@ func updateReviewDecisionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log audit action
-	adminEmail := r.Context().Value("admin_email").(string)
-	adminID := r.Context().Value("admin_id").(int64)
+	adminEmail := r.Context().Value(contextKeyAdminEmail).(string)
+	adminID := r.Context().Value(contextKeyAdminID).(int64)
 	details := fmt.Sprintf("Changed review decision to: %s", req.ReviewDecision)
 	go logAuditAction(adminID, adminEmail, "UPDATE_REVIEW_DECISION", "problem_statement", req.ID, details)
 
@@ -1168,8 +1179,8 @@ func updateSubmissionStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log audit action
-	adminEmail := r.Context().Value("admin_email").(string)
-	adminID := r.Context().Value("admin_id").(int64)
+	adminEmail := r.Context().Value(contextKeyAdminEmail).(string)
+	adminID := r.Context().Value(contextKeyAdminID).(int64)
 	details := fmt.Sprintf("Changed submission status to: %s", req.SubmissionStatus)
 	go logAuditAction(adminID, adminEmail, "UPDATE_SUBMISSION_STATUS", "problem_statement", req.ID, details)
 
@@ -1434,8 +1445,8 @@ func assignToReviewerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log audit action
-	adminEmail := r.Context().Value("admin_email").(string)
-	adminID := r.Context().Value("admin_id").(int64)
+	adminEmail := r.Context().Value(contextKeyAdminEmail).(string)
+	adminID := r.Context().Value(contextKeyAdminID).(int64)
 	details := fmt.Sprintf("Assigned to reviewer: %s", req.AssignedReviewer)
 	go logAuditAction(adminID, adminEmail, "ASSIGN_REVIEWER", "problem_statement", req.ID, details)
 
