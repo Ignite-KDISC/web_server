@@ -121,6 +121,12 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 
 func authenticateAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Allow OPTIONS requests to pass through for CORS preflight
+		if r.Method == "OPTIONS" {
+			next(w, r)
+			return
+		}
+
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			http.Error(w, "Authorization header required", http.StatusUnauthorized)
@@ -986,6 +992,56 @@ func getProblemDocumentsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func downloadDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get document ID from query parameter
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "Missing id parameter", http.StatusBadRequest)
+		return
+	}
+
+	var docID int64
+	if _, err := fmt.Sscanf(idStr, "%d", &docID); err != nil {
+		http.Error(w, "Invalid id parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch document info from database
+	var storedFileName, originalFileName, fileType string
+	query := `SELECT stored_file_name, original_file_name, file_type FROM problem_documents WHERE id = $1`
+	err := db.QueryRow(query, docID).Scan(&storedFileName, &originalFileName, &fileType)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Document not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching document: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Construct file path
+	filePath := filepath.Join("./uploads", storedFileName)
+
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.Error(w, "File not found on disk", http.StatusNotFound)
+		return
+	}
+
+	// Set headers for file download/display
+	w.Header().Set("Content-Type", fileType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", originalFileName))
+
+	// Serve the file
+	http.ServeFile(w, r, filePath)
+}
+
 func serveUploadedFileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1570,6 +1626,7 @@ func main() {
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
 	mux.HandleFunc("/api/admin/problem-documents", enableCORS(authenticateAdmin(getProblemDocumentsHandler)))
+	mux.HandleFunc("/api/admin/download-document", enableCORS(downloadDocumentHandler))
 	mux.HandleFunc("/api/admin/update-review-decision", enableCORS(authenticateAdmin(updateReviewDecisionHandler)))
 	mux.HandleFunc("/api/admin/update-submission-status", enableCORS(authenticateAdmin(updateSubmissionStatusHandler)))
 	mux.HandleFunc("/api/admin/internal-remarks", enableCORS(authenticateAdmin(getInternalRemarksHandler)))
