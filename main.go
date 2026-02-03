@@ -1235,10 +1235,11 @@ func getInternalRemarksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT id, problem_statement_id, remark_text, created_by, created_at, updated_at
-		FROM internal_remarks
-		WHERE problem_statement_id = $1
-		ORDER BY created_at DESC
+		SELECT ir.id, ir.problem_statement_id, ir.remark, au.email, ir.created_at, ir.updated_at
+		FROM internal_remarks ir
+		LEFT JOIN admin_users au ON ir.admin_id = au.id
+		WHERE ir.problem_statement_id = $1
+		ORDER BY ir.created_at DESC
 	`
 
 	rows, err := db.Query(query, problemID)
@@ -1253,21 +1254,25 @@ func getInternalRemarksHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, problemStatementID int64
 		var remarkText, createdBy string
-		var createdAt, updatedAt time.Time
+		var createdAt time.Time
+		var updatedAt *time.Time
 
 		if err := rows.Scan(&id, &problemStatementID, &remarkText, &createdBy, &createdAt, &updatedAt); err != nil {
 			log.Printf("Error scanning remark: %v", err)
 			continue
 		}
 
-		remarks = append(remarks, map[string]interface{}{
+		remark := map[string]interface{}{
 			"id":                     id,
 			"problem_statement_id":   problemStatementID,
 			"remark_text":            remarkText,
 			"created_by":             createdBy,
 			"created_at":             createdAt,
-			"updated_at":             updatedAt,
-		})
+		}
+		if updatedAt != nil {
+			remark["updated_at"] = *updatedAt
+		}
+		remarks = append(remarks, remark)
 	}
 
 	if remarks == nil {
@@ -1286,10 +1291,12 @@ func addInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get admin ID from context
+	adminID := r.Context().Value(contextKeyAdminID).(int64)
+
 	var req struct {
 		ProblemStatementID int64  `json:"problem_statement_id"`
 		RemarkText         string `json:"remark_text"`
-		CreatedBy          string `json:"created_by"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1297,19 +1304,19 @@ func addInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.RemarkText == "" || req.CreatedBy == "" {
-		http.Error(w, "remark_text and created_by are required", http.StatusBadRequest)
+	if req.RemarkText == "" {
+		http.Error(w, "remark_text is required", http.StatusBadRequest)
 		return
 	}
 
 	query := `
-		INSERT INTO internal_remarks (problem_statement_id, remark_text, created_by, created_at, updated_at)
-		VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		INSERT INTO internal_remarks (problem_statement_id, admin_id, remark, created_at)
+		VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
 		RETURNING id
 	`
 
 	var remarkID int64
-	err := db.QueryRow(query, req.ProblemStatementID, req.RemarkText, req.CreatedBy).Scan(&remarkID)
+	err := db.QueryRow(query, req.ProblemStatementID, adminID, req.RemarkText).Scan(&remarkID)
 	if err != nil {
 		log.Printf("Error adding internal remark: %v", err)
 		http.Error(w, "Failed to add internal remark", http.StatusInternalServerError)
