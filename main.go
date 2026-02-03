@@ -1012,6 +1012,33 @@ func downloadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Authenticate using token from query parameter or header
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if tokenString == "" {
+		http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse and validate token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+		return
+	}
+
 	// Get document ID from query parameter
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
@@ -1028,7 +1055,7 @@ func downloadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch document info from database
 	var storedFileName, originalFileName, fileType string
 	query := `SELECT stored_file_name, original_file_name, file_type FROM problem_documents WHERE id = $1`
-	err := db.QueryRow(query, docID).Scan(&storedFileName, &originalFileName, &fileType)
+	err = db.QueryRow(query, docID).Scan(&storedFileName, &originalFileName, &fileType)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Document not found", http.StatusNotFound)
@@ -1639,7 +1666,7 @@ func main() {
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
 	mux.HandleFunc("/api/admin/problem-documents", enableCORS(authenticateAdmin(getProblemDocumentsHandler)))
-	mux.HandleFunc("/api/admin/download-document", enableCORS(authenticateAdmin(downloadDocumentHandler)))
+	mux.HandleFunc("/api/admin/download-document", enableCORS(downloadDocumentHandler))
 	mux.HandleFunc("/api/admin/update-review-decision", enableCORS(authenticateAdmin(updateReviewDecisionHandler)))
 	mux.HandleFunc("/api/admin/update-submission-status", enableCORS(authenticateAdmin(updateSubmissionStatusHandler)))
 	mux.HandleFunc("/api/admin/internal-remarks", enableCORS(authenticateAdmin(getInternalRemarksHandler)))
