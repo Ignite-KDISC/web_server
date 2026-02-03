@@ -21,6 +21,10 @@ import (
 	_ "github.com/lib/pq"
 )
 
+var (
+	uploadsDir = "./uploads"
+)
+
 type Response struct {
 	Message   string    `json:"message"`
 	Timestamp time.Time `json:"timestamp"`
@@ -208,8 +212,7 @@ func generateFileHash(content []byte) string {
 }
 
 func saveUploadedFile(fileContent []byte, originalName string, problemID int64) (string, error) {
-	// Create uploads directory if it doesn't exist
-	uploadsDir := "/app/uploads"
+	// Ensure uploads directory exists
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create uploads directory: %v", err)
 	}
@@ -1037,7 +1040,7 @@ func downloadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Construct file path
-	filePath := filepath.Join("./uploads", storedFileName)
+	filePath := filepath.Join(uploadsDir, storedFileName)
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -1608,7 +1611,6 @@ func logAuditAction(adminUserID int64, adminEmail, action, entityType string, en
 
 func main() {
 	// Create uploads directory if it doesn't exist
-	uploadsDir := "./uploads"
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		log.Printf("⚠️  Warning: Could not create uploads directory: %v", err)
 	} else {
@@ -1637,7 +1639,7 @@ func main() {
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
 	mux.HandleFunc("/api/admin/problem-documents", enableCORS(authenticateAdmin(getProblemDocumentsHandler)))
-	mux.HandleFunc("/api/admin/download-document", enableCORS(downloadDocumentHandler))
+	mux.HandleFunc("/api/admin/download-document", enableCORS(authenticateAdmin(downloadDocumentHandler)))
 	mux.HandleFunc("/api/admin/update-review-decision", enableCORS(authenticateAdmin(updateReviewDecisionHandler)))
 	mux.HandleFunc("/api/admin/update-submission-status", enableCORS(authenticateAdmin(updateSubmissionStatusHandler)))
 	mux.HandleFunc("/api/admin/internal-remarks", enableCORS(authenticateAdmin(getInternalRemarksHandler)))
