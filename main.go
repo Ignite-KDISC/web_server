@@ -755,6 +755,11 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	adminID := r.Header.Get("X-Admin-ID")
 	adminEmail := r.Header.Get("X-Admin-Email")
 
+	// Get query parameters for filtering
+	department := r.URL.Query().Get("department")
+	startDate := r.URL.Query().Get("start_date")
+	endDate := r.URL.Query().Get("end_date")
+
 	// Get problem statements statistics
 	var totalProblems, activeProblems, underReview, accepted, rejected int
 	db.QueryRow("SELECT COUNT(*) FROM problem_statements").Scan(&totalProblems)
@@ -763,16 +768,38 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT COUNT(*) FROM problem_statements WHERE review_decision = 'Accepted'").Scan(&accepted)
 	db.QueryRow("SELECT COUNT(*) FROM problem_statements WHERE review_decision = 'Rejected'").Scan(&rejected)
 
-	// Get recent submissions
+	// Build dynamic query for recent submissions
 	recentQuery := `
 		SELECT id, reference_id, submitter_name, department_name, title, 
 		       submission_status, review_decision, created_at
 		FROM problem_statements
-		ORDER BY created_at DESC
-		LIMIT 10
+		WHERE 1=1
 	`
+	args := []interface{}{}
+	argCount := 0
 
-	rows, err := db.Query(recentQuery)
+	// Add department filter
+	if department != "" {
+		argCount++
+		recentQuery += fmt.Sprintf(" AND LOWER(department_name) LIKE LOWER($%d)", argCount)
+		args = append(args, "%"+department+"%")
+	}
+
+	// Add date range filters
+	if startDate != "" {
+		argCount++
+		recentQuery += fmt.Sprintf(" AND created_at >= $%d", argCount)
+		args = append(args, startDate)
+	}
+	if endDate != "" {
+		argCount++
+		recentQuery += fmt.Sprintf(" AND created_at <= $%d || ' 23:59:59'", argCount)
+		args = append(args, endDate)
+	}
+
+	recentQuery += " ORDER BY created_at DESC LIMIT 50"
+
+	rows, err := db.Query(recentQuery, args...)
 	if err != nil {
 		log.Printf("Error fetching recent submissions: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
