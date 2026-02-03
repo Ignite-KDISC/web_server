@@ -38,13 +38,13 @@ type ProblemStatement struct {
 	ReferenceID        string    `json:"reference_id"`
 	SubmitterName      string    `json:"submitter_name"`
 	DepartmentName     string    `json:"department_name"`
-	Designation        string    `json:"designation"`
-	ContactNumber      string    `json:"contact_number"`
+	Designation        *string   `json:"designation"`
+	ContactNumber      *string   `json:"contact_number"`
 	Email              string    `json:"email"`
 	Title              string    `json:"title"`
 	ProblemDescription string    `json:"problem_description"`
-	CurrentChallenges  string    `json:"current_challenges"`
-	ExpectedOutcome    string    `json:"expected_outcome"`
+	CurrentChallenges  *string   `json:"current_challenges"`
+	ExpectedOutcome    *string   `json:"expected_outcome"`
 	SubmissionStatus   string    `json:"submission_status"`
 	ReviewDecision     string    `json:"review_decision"`
 	AssignedReviewer   *string   `json:"assigned_reviewer"`
