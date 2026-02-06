@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/smtp"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,6 +25,17 @@ import (
 var (
 	uploadsDir = "./uploads"
 )
+
+// EmailConfig holds SMTP configuration
+type EmailConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	From     string
+}
+
+var emailConfig EmailConfig
 
 type Response struct {
 	Message   string    `json:"message"`
@@ -1659,6 +1671,31 @@ IGNIET Team
 	log.Printf("Email body: %s", emailBody)
 }
 
+// sendEmail sends an email using SMTP
+func sendEmail(to, subject, body string) error {
+	if emailConfig.Host == "" || emailConfig.Port == "" {
+		log.Println("Email configuration not set, skipping email send")
+		return fmt.Errorf("email not configured")
+	}
+
+	from := emailConfig.From
+	auth := smtp.PlainAuth("", emailConfig.Username, emailConfig.Password, emailConfig.Host)
+
+	msg := []byte(fmt.Sprintf("From: %s\r\n"+
+		"To: %s\r\n"+
+		"Subject: %s\r\n"+
+		"\r\n"+
+		"%s\r\n", from, to, subject, body))
+
+	addr := fmt.Sprintf("%s:%s", emailConfig.Host, emailConfig.Port)
+	err := smtp.SendMail(addr, auth, from, []string{to}, msg)
+	if err != nil {
+		return fmt.Errorf("failed to send email: %v", err)
+	}
+
+	return nil
+}
+
 func logAuditAction(adminUserID int64, adminEmail, action, entityType string, entityID int64, details string) {
 	query := `
 		INSERT INTO audit_logs (admin_user_id, admin_email, action, entity_type, entity_id, details, created_at)
@@ -1676,6 +1713,21 @@ func main() {
 		log.Printf("⚠️  Warning: Could not create uploads directory: %v", err)
 	} else {
 		log.Printf("✅ Uploads directory ready: %s", uploadsDir)
+	}
+
+	// Load email configuration
+	emailConfig = EmailConfig{
+		Host:     os.Getenv("SMTP_HOST"),
+		Port:     os.Getenv("SMTP_PORT"),
+		Username: os.Getenv("SMTP_USERNAME"),
+		Password: os.Getenv("SMTP_PASSWORD"),
+		From:     os.Getenv("SMTP_FROM"),
+	}
+	
+	if emailConfig.Host != "" {
+		log.Printf("✅ Email configuration loaded (SMTP: %s:%s)", emailConfig.Host, emailConfig.Port)
+	} else {
+		log.Println("⚠️  Email configuration not set - emails will not be sent")
 	}
 
 	// Initialize database connection
