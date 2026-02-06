@@ -1575,14 +1575,13 @@ func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Send email with reset link
-	log.Printf("Password reset token for %s: %s", req.Email, token)
+	// Send password reset email
+	go sendPasswordResetEmail(req.Email, token)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "If the email exists, a reset link will be sent",
-		"token":   token, // Remove this in production
 	})
 }
 
@@ -1669,6 +1668,41 @@ IGNIET Team`, name, referenceID)
 	} else {
 		log.Printf("Acknowledgment email sent successfully to %s (Ref: %s)", email, referenceID)
 	}
+}
+
+// sendPasswordResetEmail sends a password reset email with reset link
+func sendPasswordResetEmail(email, token string) error {
+	subject := "Password Reset Request - IGNIET Admin"
+	
+	// Construct reset link - use environment variable or default to localhost
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+	resetLink := fmt.Sprintf("%s/admin/reset-password?token=%s", frontendURL, token)
+	
+	body := fmt.Sprintf(`Dear Admin,
+
+We received a request to reset your password for your IGNIET admin account.
+
+To reset your password, please click on the following link:
+%s
+
+This link will expire in 24 hours.
+
+If you did not request a password reset, please ignore this email and your password will remain unchanged.
+
+Best regards,
+IGNIET Team`, resetLink)
+	
+	err := sendEmail(email, subject, body)
+	if err != nil {
+		log.Printf("Error sending password reset email to %s: %v", email, err)
+		return err
+	}
+	
+	log.Printf("Password reset email sent successfully to %s", email)
+	return nil
 }
 
 // sendEmail sends an email using SMTP
