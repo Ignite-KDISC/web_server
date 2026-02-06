@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -1567,7 +1568,7 @@ func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
 	expiresAt := time.Now().Add(24 * time.Hour)
 
 	// Store token in database
-	query := `INSERT INTO password_reset_tokens (admin_user_id, token, expires_at, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`
+	query := `INSERT INTO password_reset_tokens (admin_id, token, expires_at, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`
 	_, err = db.Exec(query, userID, token, expiresAt)
 	if err != nil {
 		log.Printf("Error storing reset token: %v", err)
@@ -1604,16 +1605,16 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// Verify token
 	var adminUserID int64
 	var expiresAt time.Time
-	var used bool
+	var isUsed bool
 
-	query := `SELECT admin_user_id, expires_at, used FROM password_reset_tokens WHERE token = $1`
-	err := db.QueryRow(query, req.Token).Scan(&adminUserID, &expiresAt, &used)
+	query := `SELECT admin_id, expires_at, is_used FROM password_reset_tokens WHERE token = $1`
+	err := db.QueryRow(query, req.Token).Scan(&adminUserID, &expiresAt, &isUsed)
 	if err != nil {
 		http.Error(w, "Invalid or expired token", http.StatusBadRequest)
 		return
 	}
 
-	if used || time.Now().After(expiresAt) {
+	if isUsed || time.Now().After(expiresAt) {
 		http.Error(w, "Invalid or expired token", http.StatusBadRequest)
 		return
 	}
@@ -1634,7 +1635,7 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark token as used
-	_, err = db.Exec("UPDATE password_reset_tokens SET used = TRUE WHERE token = $1", req.Token)
+	_, err = db.Exec("UPDATE password_reset_tokens SET is_used = TRUE WHERE token = $1", req.Token)
 	if err != nil {
 		log.Printf("Error marking token as used: %v", err)
 	}
@@ -1742,6 +1743,13 @@ func logAuditAction(adminUserID int64, adminEmail, action, entityType string, en
 }
 
 func main() {
+	// Load environment variables from .env file
+	if err := godotenv.Load("../.env"); err != nil {
+		log.Println("⚠️  No .env file found in parent directory, using system environment variables")
+	} else {
+		log.Println("✅ Loaded environment variables from .env file")
+	}
+
 	// Create uploads directory if it doesn't exist
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		log.Printf("⚠️  Warning: Could not create uploads directory: %v", err)
