@@ -1648,13 +1648,9 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendAcknowledgmentEmail(email, name, referenceID string) {
-	// TODO: Implement actual email sending using SMTP
-	// For now, just log the email
-	log.Printf("Would send acknowledgment email to %s (Name: %s, Ref: %s)", email, name, referenceID)
+	subject := "Problem Statement Submission Confirmation - IGNIET"
 	
-	// Example email content:
-	emailBody := fmt.Sprintf(`
-Dear %s,
+	body := fmt.Sprintf(`Dear %s,
 
 Thank you for submitting your problem statement to IGNIET.
 
@@ -1665,10 +1661,14 @@ Our team will review your submission and get back to you within 5-7 business day
 You can track the status of your submission by contacting our team with the reference ID.
 
 Best regards,
-IGNIET Team
-`, name, referenceID)
+IGNIET Team`, name, referenceID)
 	
-	log.Printf("Email body: %s", emailBody)
+	err := sendEmail(email, subject, body)
+	if err != nil {
+		log.Printf("Error sending acknowledgment email to %s: %v", email, err)
+	} else {
+		log.Printf("Acknowledgment email sent successfully to %s (Ref: %s)", email, referenceID)
+	}
 }
 
 // sendEmail sends an email using SMTP
