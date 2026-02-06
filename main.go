@@ -282,7 +282,7 @@ func initDB() error {
 		return fmt.Errorf("error connecting to database: %v", err)
 	}
 
-	log.Println("✅ Successfully connected to PostgreSQL database 'ignite'")
+	log.Println("✅ Successfully connected to PostgreSQL database 'igniet'")
 	
 	// Run migrations
 	if err := runMigrations(); err != nil {
@@ -423,7 +423,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	
 	dbStatus := DBStatus{
 		Connected: false,
-		Database:  "ignite",
+		Database:  "igniet",
 		Message:   "Database connection failed",
 	}
 	
@@ -1815,7 +1815,7 @@ func main() {
 	fmt.Println("   POST /api/admin/register - Admin registration")
 	fmt.Println("   POST /api/admin/login - Admin login")
 	fmt.Println("   GET  /api/admin/dashboard - Admin dashboard (protected)")
-	fmt.Println("🗄️  Database: ignite (PostgreSQL)")
+	fmt.Println("🗄️  Database: igniet (PostgreSQL)")
 	
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatal(err)
