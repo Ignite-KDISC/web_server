@@ -153,17 +153,24 @@ func authenticateAdmin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
-			return
-		}
+		var tokenString string
 
-		// Extract token from "Bearer <token>"
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
-			return
+		// First try to get token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			// Extract token from "Bearer <token>"
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			if tokenString == authHeader {
+				http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+				return
+			}
+		} else {
+			// Fallback: try to get token from query parameter (for file downloads)
+			tokenString = r.URL.Query().Get("token")
+			if tokenString == "" {
+				http.Error(w, "Authorization header required", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		// Parse and validate token
@@ -1751,10 +1758,12 @@ func sendEmail(to, subject, body string) error {
 
 func logAuditAction(adminUserID int64, adminEmail, action, entityType string, entityID int64, details string) {
 	query := `
-		INSERT INTO audit_logs (admin_user_id, admin_email, action, entity_type, entity_id, details, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+		INSERT INTO audit_logs (admin_id, action_type, entity_type, entity_id, description, created_at)
+		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
 	`
-	_, err := db.Exec(query, adminUserID, adminEmail, action, entityType, entityID, details)
+	// Combine admin email and details for description
+	description := fmt.Sprintf("[%s] %s", adminEmail, details)
+	_, err := db.Exec(query, adminUserID, action, entityType, entityID, description)
 	if err != nil {
 		log.Printf("Error logging audit action: %v", err)
 	}
