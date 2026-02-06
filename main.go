@@ -1652,7 +1652,7 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update password
-	_, err = db.Exec("UPDATE admin_users SET password = $1 WHERE id = $2", string(hashedPassword), adminUserID)
+	_, err = db.Exec("UPDATE admin_users SET password_hash = $1 WHERE id = $2", string(hashedPassword), adminUserID)
 	if err != nil {
 		log.Printf("Error updating password: %v", err)
 		http.Error(w, "Failed to update password", http.StatusInternalServerError)
