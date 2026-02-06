@@ -1408,6 +1408,24 @@ func deleteInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func exportProblemsCSVHandler(w http.ResponseWriter, r *http.Request) {
+	// Get admin info from context for audit logging
+	adminID := r.Context().Value("adminID")
+	adminEmail := r.Context().Value("adminEmail")
+	
+	// Log the export action to export_logs table
+	if adminID != nil {
+		_, err := db.Exec(
+			`INSERT INTO export_logs (admin_id, export_type, record_count, exported_at) VALUES ($1, $2, 0, CURRENT_TIMESTAMP)`,
+			adminID.(int64), "CSV",
+		)
+		if err != nil {
+			log.Printf("Error logging export: %v", err)
+		}
+		
+		// Also log to audit_logs
+		logAuditAction(adminID.(int64), adminEmail.(string), "EXPORT_CSV", "problem_statements", 0, "Exported all problem statements to CSV")
+	}
+
 	query := `
 		SELECT id, reference_id, submitter_name, department_name, designation, contact_number, email,
 		       title, problem_description, submission_status, review_decision, created_at
