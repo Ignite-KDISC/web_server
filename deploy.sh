@@ -2,7 +2,7 @@
 set -e
 
 APP_DIR="/opt/web_server"
-ENV_FILE="/opt/web_server/.env.production"
+ENV_FILE="/opt/web_server/.env"
 
 echo "🔄 Starting deployment..."
 
@@ -19,7 +19,8 @@ go build -o web_server
 
 echo "🔐 Verifying env file..."
 if [ ! -f "$ENV_FILE" ]; then
-  echo "❌ .env.production not found!"
+  echo "❌ .env not found!"
+  echo "Create it with production configuration at: $ENV_FILE"
   exit 1
 fi
 
