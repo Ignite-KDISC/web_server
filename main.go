@@ -1673,24 +1673,8 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendAcknowledgmentEmail(email, name, referenceID string) {
-	subject := "Problem Statement Submission Confirmation - IGNIET"
-
-	body := fmt.Sprintf(`Dear %s,
-	
-	Thank you for submitting your problem statement to IGNIET.
-
-	Your submission has been received successfully with the following reference ID: %s
-
-	Our team will review your submission and get back to you within 5-7 business days.
-
-	You can track the status of your submission by contacting our team with the reference ID.
-
-	For any queries, please contact us:
-	Email: ignietkdisc@gmail.com
-	Contact Number: +91 98950 26721
-
-	Best regards,
-	IGNIET Team`, name, referenceID)
+    subject := "Problem Statement Submission Confirmation - IGNIET"
+    body := fmt.Sprintf(`Dear %s,
 
 Thank you for submitting your problem statement to IGNIET.
 
@@ -1700,15 +1684,19 @@ Our team will review your submission and get back to you within 5-7 business day
 
 You can track the status of your submission by contacting our team with the reference ID.
 
+For any queries, please contact us:
+Email: ignietkdisc@gmail.com
+Contact Number: +91 98950 26721
+
 Best regards,
 IGNIET Team`, name, referenceID)
-	
-	err := sendEmail(email, subject, body)
-	if err != nil {
-		log.Printf("Error sending acknowledgment email to %s: %v", email, err)
-	} else {
-		log.Printf("Acknowledgment email sent successfully to %s (Ref: %s)", email, referenceID)
-	}
+
+    err := sendEmail(email, subject, body)
+    if err != nil {
+        log.Printf("Error sending acknowledgment email to %s: %v", email, err)
+    } else {
+        log.Printf("Acknowledgment email sent successfully to %s (Ref: %s)", email, referenceID)
+    }
 }
 
 // sendPasswordResetEmail sends a password reset email with reset link
