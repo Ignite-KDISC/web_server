@@ -103,13 +103,18 @@ sudo journalctl -u web_server -n 100
 
 ## Configuration Files
 
-### Local Development (.env)
+### Local Development (.env in project root)
 - DB_HOST=localhost
 - FRONTEND_URL=http://localhost:3000
+- Go code loads via `godotenv.Load(".env")`
 
 ### Production (/opt/web_server/.env)
 - DB_HOST=10.5.140.242
-- FRONTEND_URL=https://igniet.kdisc.kerala.gov.in (update with your actual URL)
+- FRONTEND_URL=https://igniet.kdisc.kerala.gov.in
+- systemd loads via `EnvironmentFile=/opt/web_server/.env`
+- Go code falls back to `os.Getenv()` (provided by systemd)
+
+**Important**: `.env` is created ONLY on the server, never copied from local!
 
 ## Common Commands
 
@@ -129,10 +134,21 @@ sudo journalctl -u web_server -f
 
 ## Updating Production
 
-1. Build new binary locally
-2. Stop the service: `sudo systemctl stop web_server`
-3. Copy new binary to production
-4. Start the service: `sudo systemctl start web_server`
+SSH into APP VM and run the deploy script:
+
+```bash
+ssh root@10.5.140.241
+cd /opt/web_server
+./deploy.sh
+```
+
+The script will:
+1. Pull latest code from GitHub
+2. Build binary on server
+3. Restart the service
+4. Show live logs
+
+**Never**: Copy binaries from local, Never copy .env files!
 
 ## Database Connection
 

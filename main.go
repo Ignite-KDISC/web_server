@@ -1773,9 +1773,10 @@ func logAuditAction(adminUserID int64, adminEmail, action, entityType string, en
 }
 
 func main() {
-	// Load environment variables from .env file
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Println("⚠️  No .env file found in parent directory, using system environment variables")
+	// Load environment variables from .env file (local dev)
+	// In production, systemd provides env vars via EnvironmentFile
+	if err := godotenv.Load(".env"); err != nil {
+		log.Println("⚠️  No .env file found, using system environment variables")
 	} else {
 		log.Println("✅ Loaded environment variables from .env file")
 	}
