@@ -124,9 +124,24 @@ var db *sql.DB
 
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Allow requests from production frontend and Vercel deployment
+		origin := r.Header.Get("Origin")
+		allowedOrigins := []string{
+			"https://igniet.kdisc.kerala.gov.in",
+			"https://ignietkdisc.vercel.app",
+			"http://localhost:3000", // Local development
+		}
+		
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+		
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
