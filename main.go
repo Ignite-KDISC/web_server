@@ -1773,12 +1773,17 @@ func logAuditAction(adminUserID int64, adminEmail, action, entityType string, en
 }
 
 func main() {
-	// Load environment variables from .env file (local dev)
-	// In production, systemd provides env vars via EnvironmentFile
-	if err := godotenv.Load(".env"); err != nil {
-		log.Println("⚠️  No .env file found, using system environment variables")
+	// Load environment variables from .env file ONLY if not already set
+	// In production, systemd provides env vars via EnvironmentFile - don't override them
+	if os.Getenv("DB_HOST") == "" {
+		// Not in systemd environment, try loading .env file for local dev
+		if err := godotenv.Load(".env"); err != nil {
+			log.Println("⚠️  No .env file found, using system environment variables")
+		} else {
+			log.Println("✅ Loaded environment variables from .env file")
+		}
 	} else {
-		log.Println("✅ Loaded environment variables from .env file")
+		log.Println("✅ Using environment variables from systemd")
 	}
 
 	// Create uploads directory if it doesn't exist
