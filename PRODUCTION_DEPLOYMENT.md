@@ -1,37 +1,63 @@
 # Production Deployment Guide
 
+## Architecture
+- **APP VM**: 10.5.140.241 (runs Go web server)
+- **DB VM**: 10.5.140.242 (PostgreSQL database)
+
 ## Prerequisites
+- SSH access to APP VM (10.5.140.241)
 - PostgreSQL database running on 10.5.140.242
-- Go binary built for production
-- Root access to production VM
+- Git repository access from APP VM
+- Go installed on APP VM
 
-## Deployment Steps
+## Initial Setup (One-time)
 
-### 1. Build the Go binary
+### 1. On APP VM (10.5.140.241)
+
 ```bash
-cd /home/aagneye/projects/web_server
-GOOS=linux GOARCH=amd64 go build -o web_server main.go
+# SSH into APP VM
+ssh root@10.5.140.241
+
+# Clone repository
+mkdir -p /opt
+cd /opt
+git clone https://github.com/Ignite-KDISC/web_server.git
+cd web_server
+
+# Create .env file DIRECTLY ON SERVER (NEVER copy from local)
+cat > /opt/web_server/.env <<EOF
+# Production - connects to PostgreSQL on DB VM
+DB_HOST=10.5.140.242
+DB_PORT=5432
+DB_USER=igniteuser
+DB_PASSWORD=ignitepass
+DB_NAME=ignite
+
+# Email Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=ignietkdisc@gmail.com
+SMTP_PASSWORD=lhbz jfus ezvu bcss
+SMTP_FROM=ignietkdisc@gmail.com
+
+# Frontend URL for password reset links
+FRONTEND_URL=https://igniet.kdisc.kerala.gov.in
+EOF
+
+# Set proper permissions
+chmod 600 /opt/web_server/.env
+
+# Create uploads directory
+mkdir -p /opt/web_server/uploads
+
+# Build the binary
+go build -o web_server main.go
 ```
 
-### 2. Copy files to production server
+### 2. Create systemd service
+
 ```bash
-# Create directory on production server
-ssh root@10.5.140.242 "mkdir -p /opt/web_server"
-
-# Copy binary
-scp web_server root@10.5.140.242:/opt/web_server/
-
-# Copy production environment file
-scp .env.production root@10.5.140.242:/opt/web_server/.env
-
-# Copy uploads directory structure (if needed)
-ssh root@10.5.140.242 "mkdir -p /opt/web_server/uploads"
-```
-
-### 3. Create systemd service
-```bash
-# Copy the service file to production server
-sudo tee /etc/systemd/system/web_server.service > /dev/null <<EOF
+cat > /etc/systemd/system/web_server.service <<EOF
 [Unit]
 Description=Ignite KDISC Go Web Server
 After=network.target
