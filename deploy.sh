@@ -5,12 +5,12 @@
 
 set -e
 
-echo "🏗️  Building production binary..."
+echo "  Building production binary..."
 GOOS=linux GOARCH=amd64 go build -o web_server main.go
 
-echo "📦 Production binary built successfully"
+echo " Production binary built successfully"
 echo ""
-echo "📋 Next steps:"
+echo "Next steps:"
 echo "1. Copy binary to production: scp web_server root@10.5.140.242:/opt/web_server/"
 echo "2. Copy .env file: scp .env.production root@10.5.140.242:/opt/web_server/.env"
 echo "3. Restart service: ssh root@10.5.140.242 'systemctl restart web_server'"
