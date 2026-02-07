@@ -127,7 +127,10 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 		// Allow requests from production frontend and Vercel deployment
 		origin := r.Header.Get("Origin")
 		allowedOrigins := []string{
+			"https://ignite.kdisc.kerala.gov.in",
+			"https://www.ignite.kdisc.kerala.gov.in",
 			"https://igniet.kdisc.kerala.gov.in",
+			"https://www.igniet.kdisc.kerala.gov.in",
 			"https://ignietkdisc.vercel.app",
 			"http://localhost:3000", // Local development
 		}
