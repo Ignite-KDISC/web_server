@@ -144,8 +144,9 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 		}
 		
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Access-Control-Request-Private-Network")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 		
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
