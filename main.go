@@ -132,6 +132,7 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 			"https://igniet.kdisc.kerala.gov.in",
 			"https://www.igniet.kdisc.kerala.gov.in",
 			"https://ignietkdisc.vercel.app",
+			"https://www.ignietkdisc.vercel.app",
 			"http://localhost:3000", // Local development
 		}
 		
