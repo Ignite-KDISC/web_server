@@ -136,18 +136,39 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 			"http://localhost:3000", // Local development
 		}
 		
+		// Set CORS headers for all requests
+		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
 			if origin == allowedOrigin {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				originAllowed = true
 				break
 			}
 		}
 		
+		// If no specific origin matched but we have an origin, reject
+		if !originAllowed && origin != "" {
+			// Still set basic headers but don't allow origin
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Access-Control-Request-Private-Network")
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+		}
+		
+		// Always set these headers for Private Network Access compliance
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Access-Control-Request-Private-Network")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 24 hours
 		
+		// Critical: Set Private Network Access header on ALL responses
+		if r.Header.Get("Access-Control-Request-Private-Network") == "true" || originAllowed {
+			w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		}
+		
+		// Handle preflight OPTIONS request
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
