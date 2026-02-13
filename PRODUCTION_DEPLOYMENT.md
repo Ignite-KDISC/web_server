@@ -150,6 +150,80 @@ The script will:
 
 **Never**: Copy binaries from local, Never copy .env files!
 
+## Troubleshooting
+
+### Port 8080 Already in Use
+
+If you see error: `listen tcp :8080: bind: address already in use`
+
+**1. Find the process using port 8080:**
+```bash
+sudo lsof -i :8080
+# or
+sudo ss -tlnp | grep :8080
+```
+
+**2. Kill the process:**
+```bash
+# If it's an old web_server instance
+sudo pkill web_server
+
+# Or kill by PID
+sudo kill -9 <PID>
+```
+
+**3. Restart the service:**
+```bash
+sudo systemctl restart web_server
+sudo systemctl status web_server
+```
+
+**4. If service is in restart loop:**
+```bash
+# Stop the service first
+sudo systemctl stop web_server
+
+# Kill all web_server processes
+sudo pkill -9 web_server
+
+# Remove any stale PID files
+sudo rm -f /opt/web_server/*.pid
+
+# Start fresh
+sudo systemctl start web_server
+```
+
+### Mixed Content Errors (HTTPS/HTTP)
+
+If frontend shows "Mixed Content" errors in browser console:
+
+**Cause**: Frontend served over HTTPS trying to call API over HTTP
+
+**Solution**:
+1. Ensure nginx is proxying both frontend and API on same domain
+2. Frontend should use HTTPS API URL: `https://igniet.kdisc.kerala.gov.in`
+3. Check `NEXT_PUBLIC_API_URL` environment variable in web_client
+4. If using docker-compose, set in .env file:
+   ```bash
+   NEXT_PUBLIC_API_URL=https://igniet.kdisc.kerala.gov.in
+   ```
+
+### Service Status Commands
+
+```bash
+# Check if service is running
+sudo systemctl is-active web_server
+
+# Check recent restarts (high restart count indicates issues)
+sudo systemctl status web_server | grep "restart"
+
+# View detailed service info
+sudo systemctl show web_server
+
+# Check service logs for errors
+sudo journalctl -u web_server --since "1 hour ago" | grep -i error
+```
+
 ## Database Connection
 
 Make sure PostgreSQL on 10.5.140.242:
