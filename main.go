@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -15,12 +16,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -179,6 +181,148 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// securityHeadersMiddleware sets security headers on all responses (Vulnerabilities #5 Clickjacking, #7 Security Headers).
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'self'")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// rateLimitEntry tracks request count within a time window for an IP.
+type rateLimitEntry struct {
+	count       int
+	windowStart time.Time
+}
+
+var (
+	rateLimitMu   sync.Mutex
+	rateLimitMap  = make(map[string]*rateLimitEntry)
+	rateLimitClean time.Time
+)
+
+const (
+	rateLimitWindow     = time.Minute
+	rateLimitMaxLogin   = 5
+	rateLimitMaxReset   = 3
+	rateLimitResetWindow = 15 * time.Minute
+)
+
+func rateLimitCleanup() {
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
+	if time.Since(rateLimitClean) < 5*time.Minute {
+		return
+	}
+	rateLimitClean = time.Now()
+	for k, v := range rateLimitMap {
+		if time.Since(v.windowStart) > rateLimitResetWindow {
+			delete(rateLimitMap, k)
+		}
+	}
+}
+
+// rateLimitLogin allows rateLimitMaxLogin requests per rateLimitWindow per IP (Vulnerability #8).
+func rateLimitLogin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if f := r.Header.Get("X-Forwarded-For"); f != "" {
+			ip = strings.TrimSpace(strings.Split(f, ",")[0])
+		}
+		rateLimitMu.Lock()
+		rateLimitCleanup()
+		e, ok := rateLimitMap["login:"+ip]
+		if !ok {
+			e = &rateLimitEntry{count: 0, windowStart: time.Now()}
+			rateLimitMap["login:"+ip] = e
+		}
+		if time.Since(e.windowStart) > rateLimitWindow {
+			e.count = 0
+			e.windowStart = time.Now()
+		}
+		e.count++
+		if e.count > rateLimitMaxLogin {
+			rateLimitMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": "Too many login attempts. Please try again later.",
+			})
+			return
+		}
+		rateLimitMu.Unlock()
+		next(w, r)
+	}
+}
+
+// rateLimitPasswordReset allows rateLimitMaxReset requests per rateLimitResetWindow per IP (Vulnerability #6).
+func rateLimitPasswordReset(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if f := r.Header.Get("X-Forwarded-For"); f != "" {
+			ip = strings.TrimSpace(strings.Split(f, ",")[0])
+		}
+		rateLimitMu.Lock()
+		rateLimitCleanup()
+		e, ok := rateLimitMap["reset:"+ip]
+		if !ok {
+			e = &rateLimitEntry{count: 0, windowStart: time.Now()}
+			rateLimitMap["reset:"+ip] = e
+		}
+		if time.Since(e.windowStart) > rateLimitResetWindow {
+			e.count = 0
+			e.windowStart = time.Now()
+		}
+		e.count++
+		if e.count > rateLimitMaxReset {
+			rateLimitMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"message": "If the email exists, a reset link will be sent",
+			})
+			return
+		}
+		rateLimitMu.Unlock()
+		next(w, r)
+	}
+}
+
+// sanitizeInput escapes HTML to prevent XSS (Vulnerability #2).
+func sanitizeInput(s string) string {
+	return html.EscapeString(strings.TrimSpace(s))
+}
+
+func isDigitsOnly(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidEmail(s string) bool {
+	if len(s) < 5 || len(s) > 150 {
+		return false
+	}
+	at := strings.Index(s, "@")
+	if at <= 0 || at >= len(s)-1 {
+		return false
+	}
+	dot := strings.LastIndex(s[at:], ".")
+	return dot != -1 && at+dot+1 < len(s)
+}
+
 type contextKey string
 
 const (
@@ -256,16 +400,42 @@ func generateReferenceID() (string, error) {
 	return referenceID, nil
 }
 
+// Blocked extensions for XSS via file upload (Vulnerability #4). Never allow browser-executable types.
+var blockedExtensions = map[string]bool{
+	".svg": true, ".js": true, ".mjs": true, ".html": true, ".htm": true,
+	".xml": true, ".xhtml": true, ".svgz": true,
+}
+
+var allowedExtensions = map[string]bool{
+	".pdf": true, ".doc": true, ".docx": true, ".ppt": true, ".pptx": true,
+}
+
 func isValidFileType(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
-	validTypes := map[string]bool{
-		".pdf":  true,
-		".doc":  true,
-		".docx": true,
-		".ppt":  true,
-		".pptx": true,
+	if blockedExtensions[ext] {
+		return false
 	}
-	return validTypes[ext]
+	return allowedExtensions[ext]
+}
+
+// validateFileContent checks magic bytes to ensure file type matches extension (Vulnerabilities #3, #4).
+func validateFileContent(content []byte, filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if len(content) < 8 {
+		return false
+	}
+	switch ext {
+	case ".pdf":
+		return len(content) >= 5 && string(content[:5]) == "%PDF-"
+	case ".doc", ".ppt":
+		// Older Office: D0 CF 11 E0 (OLE)
+		return content[0] == 0xD0 && content[1] == 0xCF && content[2] == 0x11 && content[3] == 0xE0
+	case ".docx", ".pptx":
+		// Office Open XML: PK (ZIP)
+		return content[0] == 0x50 && content[1] == 0x4B
+	default:
+		return false
+	}
 }
 
 func generateFileHash(content []byte) string {
@@ -514,25 +684,49 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract form fields
-	submitterName := r.FormValue("submitter_name")
-	departmentName := r.FormValue("department_name")
-	designation := r.FormValue("designation")
-	contactNumber := r.FormValue("contact_number")
-	email := r.FormValue("email")
-	title := r.FormValue("title")
-	problemDescription := r.FormValue("problem_description")
-	currentChallenges := r.FormValue("current_challenges")
-	expectedOutcome := r.FormValue("expected_outcome")
+	// Extract and sanitize form fields (Vulnerability #2: input sanitization)
+	submitterName := sanitizeInput(r.FormValue("submitter_name"))
+	departmentName := sanitizeInput(r.FormValue("department_name"))
+	designation := sanitizeInput(r.FormValue("designation"))
+	contactNumber := strings.TrimSpace(r.FormValue("contact_number"))
+	email := strings.TrimSpace(strings.ToLower(r.FormValue("email")))
+	title := sanitizeInput(r.FormValue("title"))
+	problemDescription := sanitizeInput(r.FormValue("problem_description"))
+	currentChallenges := sanitizeInput(r.FormValue("current_challenges"))
+	expectedOutcome := sanitizeInput(r.FormValue("expected_outcome"))
 
 	// Validate required fields
-	if submitterName == "" || departmentName == "" || email == "" || 
-	   title == "" || problemDescription == "" {
+	if submitterName == "" || departmentName == "" || email == "" ||
+		title == "" || problemDescription == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
 	}
 
-	// Validate character limits
+	// Strong length checks (Vulnerability #2)
+	if len(submitterName) > 150 {
+		http.Error(w, "Submitter name exceeds maximum length", http.StatusBadRequest)
+		return
+	}
+	if len(departmentName) > 200 {
+		http.Error(w, "Department name exceeds maximum length", http.StatusBadRequest)
+		return
+	}
+	if len(designation) > 150 {
+		http.Error(w, "Designation exceeds maximum length", http.StatusBadRequest)
+		return
+	}
+	if len(contactNumber) != 10 || !isDigitsOnly(contactNumber) {
+		http.Error(w, "Contact number must be exactly 10 digits", http.StatusBadRequest)
+		return
+	}
+	if len(email) > 150 || !isValidEmail(email) {
+		http.Error(w, "Invalid email address", http.StatusBadRequest)
+		return
+	}
+	if len(title) > 255 {
+		http.Error(w, "Title exceeds maximum length", http.StatusBadRequest)
+		return
+	}
 	if len(problemDescription) > 750 {
 		http.Error(w, "Problem description exceeds 750 characters", http.StatusBadRequest)
 		return
@@ -593,30 +787,40 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	problemStatement.SubmissionStatus = "Active"
 	problemStatement.ReviewDecision = "Under Review"
 
-	// Handle file uploads
+	// Handle file uploads (Vulnerabilities #3, #4: strict type and content validation)
 	uploadedFiles := []ProblemDocument{}
 	files := r.MultipartForm.File["documents"]
-	
+
 	for _, fileHeader := range files {
-		// Validate file type
+		// Validate file type by extension (whitelist only)
 		if !isValidFileType(fileHeader.Filename) {
-			log.Printf("Invalid file type: %s", fileHeader.Filename)
-			continue
+			log.Printf("Rejected file type: %s", fileHeader.Filename)
+			http.Error(w, "Invalid or disallowed file type. Only PDF, DOC, DOCX, PPT, PPTX are allowed.", http.StatusBadRequest)
+			return
 		}
 
 		// Open uploaded file
 		file, err := fileHeader.Open()
 		if err != nil {
 			log.Printf("Error opening file %s: %v", fileHeader.Filename, err)
-			continue
+			http.Error(w, "Failed to process uploaded file", http.StatusBadRequest)
+			return
 		}
-		defer file.Close()
 
 		// Read file content
 		fileContent, err := io.ReadAll(file)
+		file.Close()
 		if err != nil {
 			log.Printf("Error reading file %s: %v", fileHeader.Filename, err)
-			continue
+			http.Error(w, "Failed to read uploaded file", http.StatusBadRequest)
+			return
+		}
+
+		// Server-side MIME/content validation: ensure content matches extension
+		if !validateFileContent(fileContent, fileHeader.Filename) {
+			log.Printf("Rejected file content mismatch: %s", fileHeader.Filename)
+			http.Error(w, "File content does not match its type. Only PDF, DOC, DOCX, PPT, PPTX are allowed.", http.StatusBadRequest)
+			return
 		}
 
 		// Save file to disk
@@ -1204,12 +1408,34 @@ func downloadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set headers for file download/display
-	w.Header().Set("Content-Type", fileType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", originalFileName))
+	// Serve as attachment to prevent inline execution (XSS via PDF.js) (Vulnerability #4)
+	dispositionFileName := originalFileName
+	if dispositionFileName == "" {
+		dispositionFileName = storedFileName
+	}
+	w.Header().Set("Content-Type", safeMIMEType(fileType))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", dispositionFileName))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	// Serve the file
 	http.ServeFile(w, r, filePath)
+}
+
+func safeMIMEType(ext string) string {
+	switch strings.ToLower(ext) {
+	case "pdf":
+		return "application/pdf"
+	case "doc":
+		return "application/msword"
+	case "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "ppt":
+		return "application/vnd.ms-powerpoint"
+	case "pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func serveUploadedFileHandler(w http.ResponseWriter, r *http.Request) {
@@ -1498,11 +1724,11 @@ func deleteInternalRemarkHandler(w http.ResponseWriter, r *http.Request) {
 
 func exportProblemsCSVHandler(w http.ResponseWriter, r *http.Request) {
 	// Get admin info from context for audit logging
-	adminID := r.Context().Value("adminID")
-	adminEmail := r.Context().Value("adminEmail")
+	adminID := r.Context().Value(contextKeyAdminID)
+	adminEmail := r.Context().Value(contextKeyAdminEmail)
 	
 	// Log the export action to export_logs table
-	if adminID != nil {
+	if adminID != nil && adminEmail != nil {
 		_, err := db.Exec(
 			`INSERT INTO export_logs (admin_id, export_type, record_count, exported_at) VALUES ($1, $2, 0, CURRENT_TIMESTAMP)`,
 			adminID.(int64), "CSV",
@@ -1921,7 +2147,7 @@ func main() {
 	mux.HandleFunc("/health", enableCORS(healthHandler))
 	mux.HandleFunc("/api/problem-statements", enableCORS(createProblemStatementHandler))
 	mux.HandleFunc("/api/admin/register", enableCORS(adminRegisterHandler))
-	mux.HandleFunc("/api/admin/login", enableCORS(adminLoginHandler))
+	mux.HandleFunc("/api/admin/login", enableCORS(rateLimitLogin(adminLoginHandler)))
 	mux.HandleFunc("/api/admin/dashboard", enableCORS(authenticateAdmin(adminDashboardHandler)))
 	mux.HandleFunc("/api/admin/problem-statements", enableCORS(authenticateAdmin(listProblemStatementsHandler)))
 	mux.HandleFunc("/api/admin/problem-statement", enableCORS(authenticateAdmin(getProblemStatementHandler)))
@@ -1934,7 +2160,7 @@ func main() {
 	mux.HandleFunc("/api/admin/delete-internal-remark", enableCORS(authenticateAdmin(deleteInternalRemarkHandler)))
 	mux.HandleFunc("/api/admin/export-csv", enableCORS(authenticateAdmin(exportProblemsCSVHandler)))
 	mux.HandleFunc("/api/admin/assign-reviewer", enableCORS(authenticateAdmin(assignToReviewerHandler)))
-	mux.HandleFunc("/api/auth/request-password-reset", enableCORS(requestPasswordResetHandler))
+	mux.HandleFunc("/api/auth/request-password-reset", enableCORS(rateLimitPasswordReset(requestPasswordResetHandler)))
 	mux.HandleFunc("/api/auth/reset-password", enableCORS(resetPasswordHandler))
 	mux.HandleFunc("/uploads/", enableCORS(serveUploadedFileHandler))
 	
@@ -1949,7 +2175,8 @@ func main() {
 	fmt.Println("   GET  /api/admin/dashboard - Admin dashboard (protected)")
 	fmt.Println("🗄️  Database: igniet (PostgreSQL)")
 	
-	if err := http.ListenAndServe(port, mux); err != nil {
+	handler := securityHeadersMiddleware(mux)
+	if err := http.ListenAndServe(port, handler); err != nil {
 		log.Fatal(err)
 	}
 }
