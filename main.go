@@ -135,6 +135,7 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 			"https://www.igniet.kdisc.kerala.gov.in",
 			"https://ignietkdisc.vercel.app",
 			"https://www.ignietkdisc.vercel.app",
+			"https://103.119.178.148", // Direct IP access
 			"http://localhost:3000", // Local development
 		}
 		
@@ -1075,6 +1076,7 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	recentSubmissions := []ProblemStatement{}
 	for rows.Next() {
 		var ps ProblemStatement
+		
 		err := rows.Scan(
 			&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
 			&ps.Title, &ps.SubmissionStatus, &ps.ReviewDecision, &ps.CreatedAt,
@@ -1160,16 +1162,36 @@ func listProblemStatementsHandler(w http.ResponseWriter, r *http.Request) {
 	problemStatements := []ProblemStatement{}
 	for rows.Next() {
 		var ps ProblemStatement
+		var designation, contactNumber, currentChallenges, expectedOutcome, assignedReviewer sql.NullString
+		
 		err := rows.Scan(
 			&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
-			&ps.Designation, &ps.ContactNumber, &ps.Email, &ps.Title,
-			&ps.ProblemDescription, &ps.CurrentChallenges, &ps.ExpectedOutcome,
-			&ps.SubmissionStatus, &ps.ReviewDecision, &ps.AssignedReviewer, &ps.CreatedAt,
+			&designation, &contactNumber, &ps.Email, &ps.Title,
+			&ps.ProblemDescription, &currentChallenges, &expectedOutcome,
+			&ps.SubmissionStatus, &ps.ReviewDecision, &assignedReviewer, &ps.CreatedAt,
 		)
 		if err != nil {
 			log.Printf("Error scanning problem statement: %v", err)
 			continue
 		}
+		
+		// Convert sql.NullString to *string
+		if designation.Valid {
+			ps.Designation = &designation.String
+		}
+		if contactNumber.Valid {
+			ps.ContactNumber = &contactNumber.String
+		}
+		if currentChallenges.Valid {
+			ps.CurrentChallenges = &currentChallenges.String
+		}
+		if expectedOutcome.Valid {
+			ps.ExpectedOutcome = &expectedOutcome.String
+		}
+		if assignedReviewer.Valid {
+			ps.AssignedReviewer = &assignedReviewer.String
+		}
+		
 		problemStatements = append(problemStatements, ps)
 	}
 
@@ -1217,11 +1239,13 @@ func getProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	`
 
 	var ps ProblemStatement
+	var designation, contactNumber, currentChallenges, expectedOutcome, assignedReviewer sql.NullString
+	
 	err := db.QueryRow(query, id).Scan(
 		&ps.ID, &ps.ReferenceID, &ps.SubmitterName, &ps.DepartmentName,
-		&ps.Designation, &ps.ContactNumber, &ps.Email, &ps.Title,
-		&ps.ProblemDescription, &ps.CurrentChallenges, &ps.ExpectedOutcome,
-		&ps.SubmissionStatus, &ps.ReviewDecision, &ps.AssignedReviewer, &ps.CreatedAt,
+		&designation, &contactNumber, &ps.Email, &ps.Title,
+		&ps.ProblemDescription, &currentChallenges, &expectedOutcome,
+		&ps.SubmissionStatus, &ps.ReviewDecision, &assignedReviewer, &ps.CreatedAt,
 	)
 
 	if err != nil {
@@ -1232,6 +1256,23 @@ func getProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error fetching problem statement: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
+	}
+
+	// Convert sql.NullString to *string
+	if designation.Valid {
+		ps.Designation = &designation.String
+	}
+	if contactNumber.Valid {
+		ps.ContactNumber = &contactNumber.String
+	}
+	if currentChallenges.Valid {
+		ps.CurrentChallenges = &currentChallenges.String
+	}
+	if expectedOutcome.Valid {
+		ps.ExpectedOutcome = &expectedOutcome.String
+	}
+	if assignedReviewer.Valid {
+		ps.AssignedReviewer = &assignedReviewer.String
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -2001,7 +2042,7 @@ IGNIET Team`, resetLink)
 	return nil
 }
 
-// sendEmail sends an email using SMTP
+// sendEmail sends an email using SMTP with timeout handling
 func sendEmail(to, subject, body string) error {
 	if emailConfig.Host == "" || emailConfig.Port == "" {
 		log.Println("Email configuration not set, skipping email send")
@@ -2009,21 +2050,35 @@ func sendEmail(to, subject, body string) error {
 	}
 
 	from := emailConfig.From
-	auth := smtp.PlainAuth("", emailConfig.Username, emailConfig.Password, emailConfig.Host)
-
+	
+	// Create message
 	msg := []byte(fmt.Sprintf("From: %s\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
 		"\r\n"+
 		"%s\r\n", from, to, subject, body))
 
+	// Send email with timeout (5 seconds - fail fast if network blocked)
 	addr := fmt.Sprintf("%s:%s", emailConfig.Host, emailConfig.Port)
-	err := smtp.SendMail(addr, auth, from, []string{to}, msg)
-	if err != nil {
-		return fmt.Errorf("failed to send email: %v", err)
+	
+	// Create a channel for the result
+	done := make(chan error, 1)
+	
+	go func() {
+		auth := smtp.PlainAuth("", emailConfig.Username, emailConfig.Password, emailConfig.Host)
+		done <- smtp.SendMail(addr, auth, from, []string{to}, msg)
+	}()
+	
+	// Wait for either completion or timeout
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("failed to send email: %v", err)
+		}
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("email sending timed out (SMTP port may be blocked by firewall)")
 	}
-
-	return nil
 }
 
 func logAuditAction(adminUserID int64, adminEmail, action, entityType string, entityID int64, details string) {
