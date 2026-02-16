@@ -129,8 +129,6 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 		// Allow requests from production frontend and Vercel deployment
 		origin := r.Header.Get("Origin")
 		allowedOrigins := []string{
-			"https://ignite.kdisc.kerala.gov.in",
-			"https://www.ignite.kdisc.kerala.gov.in",
 			"https://igniet.kdisc.kerala.gov.in",
 			"https://www.igniet.kdisc.kerala.gov.in",
 			"https://ignietkdisc.vercel.app",
@@ -1002,6 +1000,12 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if db == nil {
+		log.Printf("Admin login attempted but database is not initialized")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	var req AdminLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1013,6 +1017,12 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Email and password are required", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("Admin login attempt for email: %s", req.Email)
+
+	// Protect database operations with a timeout to avoid hanging requests
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
 
 	// Get admin from database (including lockout fields)
 	query := `
@@ -1026,7 +1036,7 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	var passwordHash string
 	var failedAttempts int
 	var accountLockedUntil *time.Time
-	err := db.QueryRow(query, req.Email).Scan(
+	err := db.QueryRowContext(ctx, query, req.Email).Scan(
 		&admin.ID, &admin.Name, &admin.Email, &passwordHash,
 		&admin.Role, &admin.IsActive, &admin.LastLoginAt,
 		&failedAttempts, &accountLockedUntil, &admin.CreatedAt,
@@ -1089,8 +1099,13 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Successful login: reset failed attempts and update last login time
+	updateCtx, updateCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer updateCancel()
+
 	updateQuery := `UPDATE admin_users SET last_login_at = $1, failed_login_attempts = 0, account_locked_until = NULL WHERE id = $2`
-	db.Exec(updateQuery, now, admin.ID)
+	if _, err := db.ExecContext(updateCtx, updateQuery, now, admin.ID); err != nil {
+		log.Printf("Error updating last_login_at for admin %d: %v", admin.ID, err)
+	}
 	admin.LastLoginAt = &now
 
 	// Generate JWT token
@@ -1995,6 +2010,12 @@ func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if db == nil {
+		log.Printf("Password reset requested but database is not initialized")
+		http.Error(w, "Failed to process request", http.StatusInternalServerError)
+		return
+	}
+
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -2004,9 +2025,13 @@ func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use a timeout for database operations to prevent hanging
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
 	// Check if user exists
 	var userID int64
-	err := db.QueryRow("SELECT id FROM admin_users WHERE email = $1", req.Email).Scan(&userID)
+	err := db.QueryRowContext(ctx, "SELECT id FROM admin_users WHERE email = $1", req.Email).Scan(&userID)
 	if err != nil {
 		// Don't reveal if email exists or not for security
 		w.Header().Set("Content-Type", "application/json")
@@ -2023,7 +2048,7 @@ func requestPasswordResetHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Store token in database
 	query := `INSERT INTO password_reset_tokens (admin_id, token, expires_at, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`
-	_, err = db.Exec(query, userID, token, expiresAt)
+	_, err = db.ExecContext(ctx, query, userID, token, expiresAt)
 	if err != nil {
 		log.Printf("Error storing reset token: %v", err)
 		http.Error(w, "Failed to process request", http.StatusInternalServerError)
