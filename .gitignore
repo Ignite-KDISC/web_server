@@ -8,3 +8,6 @@ yarn-debug.log*
 yarn-error.log*
 coverage/
 *.log
+
+#uploads files
+uploads/
