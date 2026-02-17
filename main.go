@@ -1118,8 +1118,19 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
-	adminID := r.Header.Get("X-Admin-ID")
-	adminEmail := r.Header.Get("X-Admin-Email")
+	// Admin identity comes from JWT middleware context (not request headers)
+	adminID := ""
+	adminEmail := ""
+	if v := r.Context().Value(contextKeyAdminID); v != nil {
+		if id, ok := v.(int64); ok {
+			adminID = strconv.FormatInt(id, 10)
+		}
+	}
+	if v := r.Context().Value(contextKeyAdminEmail); v != nil {
+		if email, ok := v.(string); ok {
+			adminEmail = email
+		}
+	}
 
 	// Get query parameters for filtering
 	department := r.URL.Query().Get("department")
@@ -2091,23 +2102,19 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendAcknowledgmentEmail(email, name, referenceID string) {
-    subject := "Problem Statement Submission Confirmation - IGNIET"
-    body := fmt.Sprintf(`Dear %s,
+	subject := "Problem Statement Submission Confirmation – IGNIET, K-DISC"
+	body := fmt.Sprintf(`Dear %s,
 
 Thank you for submitting your problem statement to IGNIET.
-
 Your submission has been received successfully with the following reference ID: %s
-
-Our team will review your submission and get back to you within 5-7 business days.
-
-You can track the status of your submission by contacting our team with the reference ID.
 
 For any queries, please contact us:
 Email: ignietkdisc@gmail.com
-Contact Number: +91 98950 26721
+Contact Number: +91 91886 17410
 
 Best regards,
-IGNIET Team`, name, referenceID)
+IGNIET Team
+K-DISC`, name, referenceID)
 
     err := sendEmail(email, subject, body)
     if err != nil {
