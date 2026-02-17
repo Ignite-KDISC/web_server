@@ -325,6 +325,20 @@ func isValidEmail(s string) bool {
 	return dot != -1 && at+dot+1 < len(s)
 }
 
+// isValidName validates name fields - only letters, spaces, hyphens, apostrophes allowed (VAPT retest).
+func isValidName(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		// Allow: letters (A-Z, a-z), spaces, hyphens, apostrophes
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == ' ' || c == '-' || c == '\'') {
+			return false
+		}
+	}
+	return true
+}
+
 type contextKey string
 
 const (
@@ -555,8 +569,12 @@ func runMigrations() error {
 			role VARCHAR(50) DEFAULT 'ADMIN',
 			is_active BOOLEAN DEFAULT TRUE,
 			last_login_at TIMESTAMP,
+			failed_login_attempts INT DEFAULT 0,
+			account_locked_until TIMESTAMP NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS failed_login_attempts INT DEFAULT 0`,
+		`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS account_locked_until TIMESTAMP NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_email ON admin_users(email)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_active ON admin_users(is_active)`,
 		`CREATE TABLE IF NOT EXISTS internal_remarks (
@@ -680,9 +698,9 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse multipart form (max 10MB per file)
+	// Parse multipart form (max 10MB total for all files)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+		http.Error(w, "Failed to parse form data. Total file size may be too large.", http.StatusBadRequest)
 		return
 	}
 
@@ -704,9 +722,13 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Strong length checks (Vulnerability #2)
+	// Strong length checks and character validation (Vulnerability #2 - VAPT retest)
 	if len(submitterName) > 150 {
 		http.Error(w, "Submitter name exceeds maximum length", http.StatusBadRequest)
+		return
+	}
+	if !isValidName(submitterName) {
+		http.Error(w, "Submitter name can only contain letters, spaces, hyphens, and apostrophes", http.StatusBadRequest)
 		return
 	}
 	if len(departmentName) > 200 {
@@ -715,6 +737,10 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(designation) > 150 {
 		http.Error(w, "Designation exceeds maximum length", http.StatusBadRequest)
+		return
+	}
+	if designation != "" && !isValidName(designation) {
+		http.Error(w, "Designation can only contain letters, spaces, hyphens, and apostrophes", http.StatusBadRequest)
 		return
 	}
 	if len(contactNumber) != 10 || !isDigitsOnly(contactNumber) {
@@ -790,8 +816,24 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 	problemStatement.ReviewDecision = "Under Review"
 
 	// Handle file uploads (Vulnerabilities #3, #4: strict type and content validation)
+	// Bug fixes: Validate individual file sizes (5MB max) and total size (1MB max for multiple files)
 	uploadedFiles := []ProblemDocument{}
 	files := r.MultipartForm.File["documents"]
+	
+	const maxFileSize = 5 << 20 // 5MB per file
+	const maxTotalSize = 1 << 20 // 1MB total for multiple files
+	
+	// Calculate total size first
+	totalSize := int64(0)
+	for _, fileHeader := range files {
+		totalSize += fileHeader.Size
+	}
+	
+	// Validate total size for multiple files
+	if len(files) > 1 && totalSize > maxTotalSize {
+		http.Error(w, fmt.Sprintf("Total size of all files exceeds the limit of %d MB. Please reduce the number or size of files.", maxTotalSize/(1<<20)), http.StatusBadRequest)
+		return
+	}
 
 	for _, fileHeader := range files {
 		// Validate file type by extension (whitelist only)
@@ -801,11 +843,17 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Validate individual file size BEFORE reading (use header size first, then verify with actual content)
+		if fileHeader.Size > maxFileSize {
+			http.Error(w, fmt.Sprintf("File '%s' exceeds the maximum size of 5 MB. Please upload a smaller file.", fileHeader.Filename), http.StatusBadRequest)
+			return
+		}
+
 		// Open uploaded file
 		file, err := fileHeader.Open()
 		if err != nil {
 			log.Printf("Error opening file %s: %v", fileHeader.Filename, err)
-			http.Error(w, "Failed to process uploaded file", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Failed to process file '%s'. Please try again.", fileHeader.Filename), http.StatusBadRequest)
 			return
 		}
 
@@ -814,14 +862,21 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		file.Close()
 		if err != nil {
 			log.Printf("Error reading file %s: %v", fileHeader.Filename, err)
-			http.Error(w, "Failed to read uploaded file", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Failed to read file '%s'. Please try again.", fileHeader.Filename), http.StatusBadRequest)
+			return
+		}
+		
+		// Validate actual file size (more accurate than header size)
+		actualSize := int64(len(fileContent))
+		if actualSize > maxFileSize {
+			http.Error(w, fmt.Sprintf("File '%s' exceeds the maximum size of 5 MB. Please upload a smaller file.", fileHeader.Filename), http.StatusBadRequest)
 			return
 		}
 
 		// Server-side MIME/content validation: ensure content matches extension
 		if !validateFileContent(fileContent, fileHeader.Filename) {
 			log.Printf("Rejected file content mismatch: %s", fileHeader.Filename)
-			http.Error(w, "File content does not match its type. Only PDF, DOC, DOCX, PPT, PPTX are allowed.", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("File '%s' content does not match its type. Only PDF, DOC, DOCX, PPT, PPTX are allowed.", fileHeader.Filename), http.StatusBadRequest)
 			return
 		}
 
@@ -851,7 +906,7 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 			fileHeader.Filename,
 			storedFileName,
 			fileType,
-			fileHeader.Size,
+			actualSize, // Use actual size from content, not header
 		).Scan(&doc.ID, &doc.UploadedAt)
 
 		if err != nil {
@@ -863,7 +918,7 @@ func createProblemStatementHandler(w http.ResponseWriter, r *http.Request) {
 		doc.OriginalFileName = fileHeader.Filename
 		doc.StoredFileName = storedFileName
 		doc.FileType = fileType
-		doc.FileSize = fileHeader.Size
+		doc.FileSize = actualSize // Use actual size from content
 
 		uploadedFiles = append(uploadedFiles, doc)
 	}
@@ -959,18 +1014,22 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get admin from database
+	// Get admin from database (including lockout fields)
 	query := `
-		SELECT id, name, email, password_hash, role, is_active, last_login_at, created_at
+		SELECT id, name, email, password_hash, role, is_active, last_login_at, 
+		       failed_login_attempts, account_locked_until, created_at
 		FROM admin_users
 		WHERE email = $1 AND is_active = true
 	`
 
 	var admin AdminUser
 	var passwordHash string
+	var failedAttempts int
+	var accountLockedUntil *time.Time
 	err := db.QueryRow(query, req.Email).Scan(
 		&admin.ID, &admin.Name, &admin.Email, &passwordHash,
-		&admin.Role, &admin.IsActive, &admin.LastLoginAt, &admin.CreatedAt,
+		&admin.Role, &admin.IsActive, &admin.LastLoginAt,
+		&failedAttempts, &accountLockedUntil, &admin.CreatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -983,15 +1042,54 @@ func adminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if account is locked (VAPT retest: account lockout mechanism)
+	now := time.Now()
+	if accountLockedUntil != nil && now.Before(*accountLockedUntil) {
+		remainingMinutes := int(accountLockedUntil.Sub(now).Minutes()) + 1
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("Account is locked due to too many failed login attempts. Please try again after %d minutes.", remainingMinutes),
+		})
+		return
+	}
+
+	// If lockout period expired, reset failed attempts
+	if accountLockedUntil != nil && now.After(*accountLockedUntil) {
+		db.Exec("UPDATE admin_users SET failed_login_attempts = 0, account_locked_until = NULL WHERE id = $1", admin.ID)
+		failedAttempts = 0
+		accountLockedUntil = nil
+	}
+
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
+		// Increment failed attempts
+		failedAttempts++
+		const maxFailedAttempts = 5
+		const lockoutDuration = 15 * time.Minute
+		
+		if failedAttempts >= maxFailedAttempts {
+			lockUntil := now.Add(lockoutDuration)
+			db.Exec("UPDATE admin_users SET failed_login_attempts = $1, account_locked_until = $2 WHERE id = $3",
+				failedAttempts, lockUntil, admin.ID)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("Account locked due to %d failed login attempts. Please try again after %d minutes.", maxFailedAttempts, int(lockoutDuration.Minutes())),
+			})
+			return
+		} else {
+			db.Exec("UPDATE admin_users SET failed_login_attempts = $1 WHERE id = $2", failedAttempts, admin.ID)
+		}
+		
 		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 		return
 	}
 
-	// Update last login time
-	updateQuery := `UPDATE admin_users SET last_login_at = $1 WHERE id = $2`
-	now := time.Now()
+	// Successful login: reset failed attempts and update last login time
+	updateQuery := `UPDATE admin_users SET last_login_at = $1, failed_login_attempts = 0, account_locked_until = NULL WHERE id = $2`
 	db.Exec(updateQuery, now, admin.ID)
 	admin.LastLoginAt = &now
 
@@ -1410,14 +1508,24 @@ func downloadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve as attachment to prevent inline execution (XSS via PDF.js) (Vulnerability #4)
+	// Check if preview mode is requested (for admin dashboard preview)
+	previewMode := r.URL.Query().Get("preview") == "true"
+	
 	dispositionFileName := originalFileName
 	if dispositionFileName == "" {
 		dispositionFileName = storedFileName
 	}
 	w.Header().Set("Content-Type", safeMIMEType(fileType))
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", dispositionFileName))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	
+	// For preview mode (admin dashboard), use inline; otherwise attachment for security (Vulnerability #4)
+	if previewMode {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", dispositionFileName))
+		// Add CSP header for PDF preview to prevent XSS
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'none'; object-src 'none';")
+	} else {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", dispositionFileName))
+	}
 
 	// Serve the file
 	http.ServeFile(w, r, filePath)
