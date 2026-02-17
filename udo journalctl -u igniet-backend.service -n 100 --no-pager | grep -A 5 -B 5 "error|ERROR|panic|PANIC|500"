@@ -1,5 +1,0 @@
- id |     name     |         email         | role  | is_active |         created_at         
-----+--------------+-----------------------+-------+-----------+----------------------------
-  1 | IGNIET Admin | ignietkdisc@gmail.com | ADMIN | t         | 2026-02-13 07:36:18.861713
-(1 row)
-
